@@ -59,6 +59,12 @@ const App: React.FC = () => {
   const [loopYFit, setLoopYFit] = useState<[number, number] | null>(null)
   const draggingRef = useRef(false)
 
+  // Native playback time tracking
+  const [nativePlaybackTime, setNativePlaybackTime] = useState(0);
+  const [userPlaybackTime, setUserPlaybackTime] = useState(0);
+  const userAudioRef = useRef<HTMLAudioElement | null>(null);
+  const userAudioPlayingRef = useRef(false);
+
   // Extract pitch from user recording when audioBlob changes
   React.useEffect(() => {
     if (!audioBlob) return;
@@ -193,44 +199,81 @@ const App: React.FC = () => {
     setLoopEnd(duration)
   }, [nativePitchData.times])
 
-  // --- Native media loop playback logic ---
+  // --- Native playback time tracking ---
   React.useEffect(() => {
     const media = nativeVideoRef.current;
-    if (!media || !nativeMediaUrl) return;
-    let timeout: NodeJS.Timeout | null = null;
-
-    const onTimeUpdate = () => {
-      if (media.currentTime >= loopEnd && loopEnd > loopStart) {
-        media.pause();
-        if (timeout) clearTimeout(timeout);
-        timeout = setTimeout(() => {
-          media.currentTime = loopStart;
-          media.play();
-        }, loopDelay);
-      }
+    if (!media) return;
+    let raf: number | null = null;
+    const update = () => {
+      setNativePlaybackTime(media.currentTime || 0);
+      raf = requestAnimationFrame(update);
     };
-
-    // Always seek to loopStart if user presses play and currentTime is outside loop
-    const onPlay = () => {
-      if (media.currentTime < loopStart || media.currentTime > loopEnd) {
-        media.currentTime = loopStart;
-      }
-    };
-
-    media.addEventListener('timeupdate', onTimeUpdate);
-    media.addEventListener('play', onPlay);
-
-    // If loop region changes, and media is playing, jump to new loopStart
-    if (media.currentTime < loopStart || media.currentTime > loopEnd) {
-      media.currentTime = loopStart;
+    if (!media.paused) {
+      raf = requestAnimationFrame(update);
     }
-
+    const onPlay = () => {
+      raf = requestAnimationFrame(update);
+    };
+    const onPause = () => {
+      if (raf) cancelAnimationFrame(raf);
+    };
+    media.addEventListener('play', onPlay);
+    media.addEventListener('pause', onPause);
     return () => {
-      media.removeEventListener('timeupdate', onTimeUpdate);
       media.removeEventListener('play', onPlay);
+      media.removeEventListener('pause', onPause);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [nativeMediaUrl, nativeMediaType]);
+
+  // --- Native media loop segment logic ---
+  React.useEffect(() => {
+    const media = nativeVideoRef.current;
+    if (!media) return;
+    let timeout: NodeJS.Timeout | null = null;
+    if (
+      !media.paused &&
+      loopEnd > loopStart &&
+      nativePlaybackTime >= loopEnd
+    ) {
+      media.pause();
+      timeout = setTimeout(() => {
+        media.currentTime = loopStart;
+        media.play();
+      }, loopDelay);
+    }
+    return () => {
       if (timeout) clearTimeout(timeout);
     };
-  }, [nativeMediaUrl, loopStart, loopEnd, loopDelay, nativeMediaType]);
+  }, [nativePlaybackTime, loopStart, loopEnd, loopDelay]);
+
+  // --- User recording playback time tracking ---
+  React.useEffect(() => {
+    const audio = userAudioRef.current;
+    if (!audio) return;
+    let raf: number | null = null;
+    const update = () => {
+      setUserPlaybackTime(audio.currentTime || 0);
+      if (!audio.paused) {
+        raf = requestAnimationFrame(update);
+      }
+    };
+    const onPlay = () => {
+      userAudioPlayingRef.current = true;
+      raf = requestAnimationFrame(update);
+    };
+    const onPause = () => {
+      userAudioPlayingRef.current = false;
+      if (raf) cancelAnimationFrame(raf);
+    };
+    audio.addEventListener('play', onPlay);
+    audio.addEventListener('pause', onPause);
+    return () => {
+      audio.removeEventListener('play', onPlay);
+      audio.removeEventListener('pause', onPause);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [userPitchData.times, audioBlob]);
 
   // On initial load or when nativePitchData changes, fit y axis to full pitch curve
   React.useEffect(() => {
@@ -452,6 +495,7 @@ const App: React.FC = () => {
               loopStart={loopStart}
               loopEnd={loopEnd}
               yFit={loopYFit}
+              playbackTime={nativePlaybackTime}
             />
           </section>
 
@@ -462,8 +506,15 @@ const App: React.FC = () => {
               pitches={userPitchData.pitches}
               label="Your Pitch (Hz)"
               color="#1976d2"
+              playbackTime={userPlaybackTime}
             />
-            <Recorder onRecordingComplete={(_, blob) => setAudioBlob(blob)} />
+            <audio
+              ref={userAudioRef}
+              src={audioBlob ? URL.createObjectURL(audioBlob) : undefined}
+              style={{ display: 'none' }}
+              onEnded={() => setUserPlaybackTime(0)}
+            />
+            <Recorder onRecordingComplete={(_, blob: Blob) => setAudioBlob(blob)} />
           </section>
         </main>
         <Footer />

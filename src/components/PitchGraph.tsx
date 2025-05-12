@@ -26,6 +26,7 @@ interface LoopOverlayOptions {
 declare module 'chart.js' {
   interface PluginOptionsByType<TType extends keyof ChartTypeRegistry> {
     loopOverlay?: LoopOverlayOptions;
+    playbackIndicator?: { playbackTime?: number };
   }
 }
 
@@ -37,6 +38,7 @@ export interface PitchGraphWithControlsProps {
   loopStart?: number;
   loopEnd?: number;
   yFit?: [number, number] | null;
+  playbackTime?: number;
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -52,20 +54,20 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
   loopStart,
   loopEnd,
   yFit,
+  playbackTime = undefined,
 }) => {
   const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
   const [yRange, setYRange] = useState<[number, number]>([Y_MIN_LIMIT, Y_MAX_LIMIT]);
 
-  // Update chart options when loop values change
+  // Update chart options when loop values or playbackTime change
   useEffect(() => {
     const chart = chartRef.current;
     if (chart?.options?.plugins) {
-      // Update plugin options
       chart.options.plugins.loopOverlay = { loopStart, loopEnd };
-      // Force update without animation
+      chart.options.plugins.playbackIndicator = { playbackTime };
       chart.update('none');
     }
-  }, [loopStart, loopEnd]);
+  }, [loopStart, loopEnd, playbackTime]);
 
   useEffect(() => {
     if (yFit && yFit.length === 2) {
@@ -175,6 +177,31 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     },
   };
 
+  // Playback indicator plugin
+  const playbackIndicatorPlugin: Plugin<'line'> = {
+    id: 'playbackIndicator',
+    afterDatasetsDraw: (chart: Chart) => {
+      const options = chart.options.plugins?.playbackIndicator as { playbackTime?: number };
+      if (!options || options.playbackTime == null) return;
+      const t = options.playbackTime;
+      const xScale = chart.scales.x;
+      const yScale = chart.scales.y;
+      if (!xScale || !yScale) return;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,0,0,0.8)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 4]);
+      const x = xScale.getPixelForValue(t);
+      ctx.beginPath();
+      ctx.moveTo(x, yScale.top);
+      ctx.lineTo(x, yScale.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    },
+  };
+
   const options = {
     responsive: true,
     maintainAspectRatio: false,
@@ -200,6 +227,9 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
       loopOverlay: {
         loopStart,
         loopEnd,
+      },
+      playbackIndicator: {
+        playbackTime,
       },
     },
     scales: {
@@ -246,7 +276,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
         }}
         className="pitch-graph-container"
       >
-        <Line ref={chartRef} data={chartData} options={options} plugins={[loopOverlayPlugin]} />
+        <Line ref={chartRef} data={chartData} options={options} plugins={[loopOverlayPlugin, playbackIndicatorPlugin]} />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button
