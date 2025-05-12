@@ -12,6 +12,8 @@ import {
   CategoryScale,
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
+import Slider from '@mui/material/Slider';
+import TextField from '@mui/material/TextField';
 
 ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale, zoomPlugin);
 
@@ -42,11 +44,18 @@ const MAX_PITCH = 500;
 const MIN_CLARITY = 0.8;
 const MEDIAN_FILTER_SIZE = 5;
 
+const Y_MIN_LIMIT = 0;
+const Y_MAX_LIMIT = 600;
+const Y_RANGE_MIN = 200;
+const Y_RANGE_MAX = 600;
+
 const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
   const [pitchData, setPitchData] = useState<{ times: number[]; pitches: (number | null)[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const lastBlob = useRef<Blob | null>(null);
   const chartRef = useRef<any>(null);
+  // y-axis range state
+  const [yRange, setYRange] = useState<[number, number]>([Y_RANGE_MIN, Y_RANGE_MAX]);
 
   useEffect(() => {
     if (!audioBlob || audioBlob === lastBlob.current) return;
@@ -80,8 +89,20 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
         // Apply median filter for smoothing
         const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
         setPitchData({ times, pitches: smoothed });
+        // Set y-axis range to min/max of pitch curve + 50 Hz padding
+        const validPitches = smoothed.filter((p) => p !== null) as number[];
+        if (validPitches.length > 0) {
+          const minPitch = Math.min(...validPitches);
+          const maxPitch = Math.max(...validPitches);
+          const paddedMin = Math.max(Y_MIN_LIMIT, Math.floor(minPitch - 50));
+          const paddedMax = Math.min(Y_MAX_LIMIT, Math.ceil(maxPitch + 50));
+          setYRange([paddedMin, paddedMax]);
+        } else {
+          setYRange([Y_RANGE_MIN, Y_RANGE_MAX]);
+        }
       } catch (e) {
         setPitchData(null);
+        setYRange([Y_RANGE_MIN, Y_RANGE_MAX]);
       } finally {
         setLoading(false);
       }
@@ -135,7 +156,7 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
   const options = {
     responsive: true,
     maintainAspectRatio: false,
-    animation: false,
+    animation: false as const,
     plugins: {
       legend: { display: false },
       title: { display: false },
@@ -153,7 +174,7 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
         },
         limits: {
           x: { min: 0, max: xMax },
-          y: { min: 0, max: 600 },
+          y: { min: Y_MIN_LIMIT, max: Y_MAX_LIMIT },
         },
       },
     },
@@ -167,8 +188,8 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
       },
       y: {
         title: { display: true, text: 'Pitch (Hz)' },
-        min: 0,
-        max: 600,
+        min: yRange[0],
+        max: yRange[1],
       },
     },
     elements: {
@@ -182,10 +203,59 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
     }
   };
 
+  // Slider/input handlers
+  const handleSliderChange = (_: any, newValue: number | number[]) => {
+    if (Array.isArray(newValue)) {
+      setYRange([Math.min(...newValue), Math.max(...newValue)]);
+    }
+  };
+  const handleInputChange = (index: 0 | 1) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = Number(e.target.value);
+    if (isNaN(value)) value = yRange[index];
+    value = Math.max(Y_MIN_LIMIT, Math.min(Y_MAX_LIMIT, value));
+    let newRange: [number, number] = [...yRange] as [number, number];
+    newRange[index] = value;
+    // Ensure min <= max
+    if (newRange[0] > newRange[1]) {
+      if (index === 0) newRange[1] = value;
+      else newRange[0] = value;
+    }
+    setYRange([Math.min(...newRange), Math.max(...newRange)]);
+  };
+
   return (
-    <div style={{ width: '100%', height: 380, background: '#fff', borderRadius: 8, padding: 8 }}>
-      <Line ref={chartRef} data={chartData} options={options} />
-      <div style={{ textAlign: 'right', marginTop: 8 }}>
+    <div style={{ width: '100%', background: '#fff', borderRadius: 8, padding: 8 }}>
+      <div style={{ height: 380 }}>
+        <Line ref={chartRef} data={chartData} options={options} />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap' }}>
+        <span style={{ fontWeight: 500 }}>Pitch range (Hz):</span>
+        <TextField
+          size="small"
+          type="number"
+          label="Min"
+          value={yRange[0]}
+          onChange={handleInputChange(0)}
+          inputProps={{ min: Y_MIN_LIMIT, max: yRange[1], step: 1, style: { width: 60 } }}
+        />
+        <Slider
+          value={yRange}
+          onChange={handleSliderChange}
+          min={Y_MIN_LIMIT}
+          max={Y_MAX_LIMIT}
+          step={1}
+          valueLabelDisplay="auto"
+          sx={{ width: 220 }}
+        />
+        <TextField
+          size="small"
+          type="number"
+          label="Max"
+          value={yRange[1]}
+          onChange={handleInputChange(1)}
+          inputProps={{ min: yRange[0], max: Y_MAX_LIMIT, step: 1, style: { width: 60 } }}
+        />
+        <div style={{ flex: 1 }} />
         <button onClick={handleResetZoom} style={{ padding: '6px 16px', borderRadius: 4, border: 'none', background: '#1976d2', color: '#fff', cursor: 'pointer' }}>
           Reset Zoom
         </button>
