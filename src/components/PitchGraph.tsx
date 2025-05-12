@@ -19,8 +19,31 @@ interface PitchGraphProps {
   audioBlob: Blob | null;
 }
 
+// Simple median filter for smoothing
+function medianFilter(arr: (number | null)[], windowSize: number): (number | null)[] {
+  const result: (number | null)[] = [];
+  for (let i = 0; i < arr.length; i++) {
+    const window: number[] = [];
+    for (let j = Math.max(0, i - Math.floor(windowSize / 2)); j <= Math.min(arr.length - 1, i + Math.floor(windowSize / 2)); j++) {
+      if (arr[j] !== null && !isNaN(arr[j]!)) window.push(arr[j]!);
+    }
+    if (window.length > 0) {
+      window.sort((a, b) => a - b);
+      result.push(window[Math.floor(window.length / 2)]);
+    } else {
+      result.push(null);
+    }
+  }
+  return result;
+}
+
+const MIN_PITCH = 60;
+const MAX_PITCH = 500;
+const MIN_CLARITY = 0.8;
+const MEDIAN_FILTER_SIZE = 5;
+
 const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
-  const [pitchData, setPitchData] = useState<{ times: number[]; pitches: number[] } | null>(null);
+  const [pitchData, setPitchData] = useState<{ times: number[]; pitches: (number | null)[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const lastBlob = useRef<Blob | null>(null);
 
@@ -40,15 +63,22 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
         const frameSize = 2048;
         const hopSize = 256;
         const detector = PitchDetector.forFloat32Array(frameSize);
-        const pitches: number[] = [];
+        const pitches: (number | null)[] = [];
         const times: number[] = [];
         for (let i = 0; i + frameSize < channelData.length; i += hopSize) {
           const frame = channelData.slice(i, i + frameSize);
           const [pitch, clarity] = detector.findPitch(frame, sampleRate);
-          pitches.push(pitch > 0 && clarity > 0.8 ? pitch : null);
+          // Filter: only keep pitches in range and with high clarity
+          if (pitch >= MIN_PITCH && pitch <= MAX_PITCH && clarity >= MIN_CLARITY) {
+            pitches.push(pitch);
+          } else {
+            pitches.push(null);
+          }
           times.push(i / sampleRate);
         }
-        setPitchData({ times, pitches });
+        // Apply median filter for smoothing
+        const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+        setPitchData({ times, pitches: smoothed });
       } catch (e) {
         setPitchData(null);
       } finally {
@@ -91,7 +121,8 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
         data: pitchData.pitches,
         borderColor: '#1976d2',
         backgroundColor: 'rgba(25, 118, 210, 0.1)',
-        spanGaps: true,
+        // spanGaps: false ensures the curve breaks at nulls (unvoiced/silence/spikes)
+        spanGaps: false,
         pointRadius: 0,
         borderWidth: 2,
       },
