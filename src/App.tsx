@@ -31,9 +31,8 @@ const MEDIAN_FILTER_SIZE = 5
 
 const App: React.FC = () => {
   // User pitch data
-  const [audioUrl, setAudioUrl] = useState<string | null>(null)
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
   const [userPitchData, setUserPitchData] = useState<{ times: number[]; pitches: (number | null)[] }>({ times: [], pitches: [] })
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
 
   // Native pitch data
   const [nativePitchData, setNativePitchData] = useState<{ times: number[]; pitches: (number | null)[] }>({ times: [], pitches: [] })
@@ -214,7 +213,7 @@ const App: React.FC = () => {
               label="User Pitch (Hz)"
               color="#1976d2"
             />
-            <Recorder onRecordingComplete={(url, blob) => { setAudioUrl(url); setAudioBlob(blob); }} />
+            <Recorder onRecordingComplete={(_, blob) => { setAudioBlob(blob); }} />
           </section>
         </main>
         <Footer />

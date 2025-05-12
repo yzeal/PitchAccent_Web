@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { PitchDetector } from 'pitchy';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -95,7 +94,6 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
         pan: {
           enabled: true,
           mode: 'x' as const,
-          modifierKey: null,
         },
         zoom: {
           wheel: { enabled: true },
