@@ -44,6 +44,7 @@ const App: React.FC = () => {
   // User pitch data
   const [userPitchData, setUserPitchData] = useState<{ times: number[]; pitches: (number | null)[] }>({ times: [], pitches: [] })
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
+  const [userAudioUrl, setUserAudioUrl] = useState<string | undefined>(undefined)
 
   // Native pitch data
   const [nativePitchData, setNativePitchData] = useState<{ times: number[]; pitches: (number | null)[] }>({ times: [], pitches: [] })
@@ -62,7 +63,7 @@ const App: React.FC = () => {
   // Native playback time tracking
   const [nativePlaybackTime, setNativePlaybackTime] = useState(0);
   const [userPlaybackTime, setUserPlaybackTime] = useState(0);
-  const userAudioRef = useRef<HTMLAudioElement | null>(null);
+  const userAudioRef = useRef<HTMLAudioElement>(null);
   const userAudioPlayingRef = useRef(false);
 
   // Extract pitch from user recording when audioBlob changes
@@ -352,6 +353,18 @@ const App: React.FC = () => {
     }
   }
 
+  React.useEffect(() => {
+    if (!audioBlob) {
+      setUserAudioUrl(undefined);
+      return;
+    }
+    const url = URL.createObjectURL(audioBlob);
+    setUserAudioUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [audioBlob]);
+
   console.log('App render loopStart/loopEnd', loopStart, loopEnd);
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -508,13 +521,12 @@ const App: React.FC = () => {
               color="#1976d2"
               playbackTime={userPlaybackTime}
             />
-            <audio
-              ref={userAudioRef}
-              src={audioBlob ? URL.createObjectURL(audioBlob) : undefined}
-              style={{ display: 'none' }}
-              onEnded={() => setUserPlaybackTime(0)}
+            <Recorder
+              onRecordingComplete={(_, blob: Blob) => setAudioBlob(blob)}
+              audioUrl={userAudioUrl}
+              audioRef={userAudioRef}
+              showPlayer={true}
             />
-            <Recorder onRecordingComplete={(_, blob: Blob) => setAudioBlob(blob)} />
           </section>
         </main>
         <Footer />

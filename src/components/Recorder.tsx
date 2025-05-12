@@ -3,6 +3,9 @@ import Button from '@mui/material/Button';
 
 interface RecorderProps {
   onRecordingComplete?: (audioUrl: string, audioBlob: Blob) => void;
+  audioUrl?: string | null;
+  audioRef?: React.RefObject<HTMLAudioElement | null>;
+  showPlayer?: boolean;
 }
 
 const getSupportedMimeType = () => {
@@ -21,15 +24,16 @@ const getSupportedMimeType = () => {
   return '';
 };
 
-const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
+const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, audioUrl, audioRef, showPlayer = true }) => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [status, setStatus] = useState<'idle' | 'recording' | 'stopped'>('idle');
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const startRecording = async () => {
     setError(null);
-    setAudioUrl(null);
+    if (audioRef && audioRef.current) {
+      audioRef.current.src = '';
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mimeType = getSupportedMimeType();
@@ -44,7 +48,6 @@ const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: mimeType || 'audio/webm' });
         const url = URL.createObjectURL(blob);
-        setAudioUrl(url);
         if (onRecordingComplete) {
           onRecordingComplete(url, blob);
         }
@@ -65,7 +68,9 @@ const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
   };
 
   const clearRecording = () => {
-    setAudioUrl(null);
+    if (audioRef && audioRef.current) {
+      audioRef.current.src = '';
+    }
     setStatus('idle');
     setError(null);
   };
@@ -85,8 +90,8 @@ const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => {
           Clear
         </Button>
       </div>
-      {audioUrl && (
-        <audio src={audioUrl} controls style={{ marginTop: 16 }} />
+      {audioUrl && showPlayer && (
+        <audio ref={audioRef} src={audioUrl} controls style={{ marginTop: 16 }} />
       )}
     </div>
   );
