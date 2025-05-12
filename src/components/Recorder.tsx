@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import Button from '@mui/material/Button';
 
 interface RecorderProps {
@@ -6,6 +6,10 @@ interface RecorderProps {
   audioUrl?: string | null;
   audioRef?: React.RefObject<HTMLAudioElement | null>;
   showPlayer?: boolean;
+}
+
+function isMobile() {
+  return /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
 }
 
 const getSupportedMimeType = () => {
@@ -28,6 +32,20 @@ const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, audioUrl, audi
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const [status, setStatus] = useState<'idle' | 'recording' | 'stopped'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | undefined>(undefined);
+
+  // Enumerate audio input devices on mount (desktop only)
+  useEffect(() => {
+    if (isMobile()) return;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(() => {
+      navigator.mediaDevices.enumerateDevices().then(devices => {
+        const mics = devices.filter(d => d.kind === 'audioinput');
+        setDevices(mics);
+        if (mics.length > 0) setSelectedDeviceId(mics[0].deviceId);
+      });
+    });
+  }, []);
 
   const startRecording = async () => {
     setError(null);
@@ -35,7 +53,10 @@ const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, audioUrl, audi
       audioRef.current.src = '';
     }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const constraints: MediaStreamConstraints = {
+        audio: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const mimeType = getSupportedMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       mediaRecorderRef.current = recorder;
@@ -79,6 +100,21 @@ const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete, audioUrl, audi
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
       <div>Status: <b>{status}</b></div>
       {error && <div style={{ color: 'red', fontSize: 12 }}>{error}</div>}
+      {!isMobile() && devices.length > 0 && (
+        <div style={{ margin: '8px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label htmlFor="mic-select" style={{ fontSize: 13 }}>Microphone:</label>
+          <select
+            id="mic-select"
+            value={selectedDeviceId}
+            onChange={e => setSelectedDeviceId(e.target.value)}
+            style={{ fontSize: 13 }}
+          >
+            {devices.map(d => (
+              <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId}`}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8 }}>
         <Button variant="contained" color="primary" onClick={startRecording} disabled={status === 'recording'}>
           Record

@@ -1,0 +1,19 @@
+# User Guide & Options Menu Notes
+
+## User Guide
+- Supported file formats for different browsers and platforms
+- Warning about sudden volume change when recording on iOS, especially with headphones
+- On iOS, pitch extraction from .mov and some video files may not work; recommend using .mp3, .wav, or .m4a audio files or converting videos before use
+- All browsers on iOS (Safari, Chrome, Firefox, etc.) have the same audio and media limitations due to WebKit; there is no workaround in web apps
+- If audio output volume is stuck after recording on iOS, try reloading the page or closing the tab to restore normal volume control
+
+## Options Menu (future ideas)
+- Customizable loop delay for native and user recordings
+- Adjustable y-axis range and auto-fit options for pitch graphs
+- Toggle for showing/hiding playback indicator on pitch graphs
+- Option to select audio input/output devices (where supported)
+- Option to choose smoothing/filtering method for pitch curves
+- Keyboard shortcuts customization
+- **Microphone selection dropdown for desktop browsers only** (use `enumerateDevices` and `getUserMedia` with `deviceId`; hide on mobile for cleaner UI and because it's not supported)
+
+# Add more notes here as new features/ideas arise 
