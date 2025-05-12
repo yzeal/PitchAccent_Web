@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -202,7 +202,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     },
   };
 
-  const options = {
+  const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
     animation: false as const,
@@ -250,7 +250,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     elements: {
       line: { tension: 0.2 },
     },
-  };
+  }), [yRange, xMax, loopStart, loopEnd]);
 
   const handleResetZoom = () => {
     if (chartRef.current) {
