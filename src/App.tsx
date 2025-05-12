@@ -1,10 +1,14 @@
-import React from 'react'
+import React, { useState } from 'react'
 import Header from './components/Header'
 import Footer from './components/Footer'
 import Recorder from './components/Recorder'
+import PitchGraph from './components/PitchGraph'
 import './App.css'
 
 const App: React.FC = () => {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
@@ -13,14 +17,11 @@ const App: React.FC = () => {
           {/* Controls and graph will go here */}
           <section style={{ marginBottom: '2rem' }}>
             <h2>Record and Playback</h2>
-            <Recorder />
+            <Recorder onRecordingComplete={(url, blob) => { setAudioUrl(url); setAudioBlob(blob); }} />
           </section>
           <section>
             <h2>Pitch Graph</h2>
-            {/* Pitch graph placeholder */}
-            <div style={{ height: 200, background: '#eee', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa' }}>
-              Pitch graph will appear here
-            </div>
+            <PitchGraph audioBlob={audioBlob} />
           </section>
         </main>
         <Footer />

@@ -2,9 +2,18 @@ import React from 'react';
 import { ReactMediaRecorder } from 'react-media-recorder';
 import Button from '@mui/material/Button';
 
-const Recorder: React.FC = () => (
+interface RecorderProps {
+  onRecordingComplete?: (audioUrl: string, audioBlob: Blob) => void;
+}
+
+const Recorder: React.FC<RecorderProps> = ({ onRecordingComplete }) => (
   <ReactMediaRecorder
     audio
+    onStop={(blobUrl, blob) => {
+      if (onRecordingComplete) {
+        onRecordingComplete(blobUrl, blob);
+      }
+    }}
     render={({ status, startRecording, stopRecording, mediaBlobUrl, clearBlobUrl }) => (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
         <div>Status: <b>{status}</b></div>
