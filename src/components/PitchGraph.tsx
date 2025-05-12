@@ -205,7 +205,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     },
   };
 
-  // Memoize options, but do NOT include loopStart/loopEnd
+  // Memoize options, do NOT include yRange
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -241,14 +241,28 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
       y: {
         title: { display: false },
         ticks: { font: { size: 10 } },
-        min: yRange[0],
-        max: yRange[1],
+        // min/max will be set directly on the chart instance
       },
     },
     elements: {
       line: { tension: 0.2 },
     },
-  }), [yRange, xMax]);
+  }), [xMax]);
+
+  // When yRange changes, update the chart instance directly
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (chart?.options?.scales?.y) {
+      chart.options.scales.y.min = yRange[0];
+      chart.options.scales.y.max = yRange[1];
+      // Also update overlay and playback indicator
+      if (chart.options.plugins) {
+        chart.options.plugins.loopOverlay = { loopStart, loopEnd };
+        chart.options.plugins.playbackIndicator = { playbackTime };
+      }
+      chart.update('none');
+    }
+  }, [yRange, loopStart, loopEnd, playbackTime]);
 
   const handleResetZoom = () => {
     if (chartRef.current) {
