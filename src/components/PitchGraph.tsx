@@ -135,6 +135,7 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
   const options = {
     responsive: true,
     maintainAspectRatio: false,
+    animation: false,
     plugins: {
       legend: { display: false },
       title: { display: false },
