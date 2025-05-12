@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react'
-import Header from './components/Header'
 import Footer from './components/Footer'
 import Recorder from './components/Recorder'
 import PitchGraphWithControls from './components/PitchGraph'
@@ -369,7 +368,7 @@ const App: React.FC = () => {
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
-        <Header />
+        <h1 className="chorusing-title">Chorusing Drill</h1>
         <main style={{ flex: 1, padding: '1rem 0', width: '100%' }}>
           {/* Native Recording Section */}
           <section style={{ marginBottom: '1rem' }}>
@@ -531,6 +530,45 @@ const App: React.FC = () => {
         </main>
         <Footer />
       </div>
+      <style>{`
+        .pitch-graph-container {
+          touch-action: pinch-zoom pan-x pan-y;
+        }
+        @media (max-width: 768px) {
+          .container {
+            width: 100vw;
+            overflow-x: hidden;
+            box-sizing: border-box;
+            padding-left: max(2vw, env(safe-area-inset-left));
+            padding-right: max(2vw, env(safe-area-inset-right));
+          }
+          .pitch-graph-container {
+            touch-action: none;
+            height: 80px !important;
+            min-height: 80px !important;
+            max-height: 80px !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            box-sizing: border-box;
+            padding: 0;
+            margin: 0;
+          }
+          .chorusing-title {
+            font-size: 1.3rem;
+            margin-bottom: 0.5rem;
+          }
+          .container, main, section, .pitch-graph-container, .chorusing-title {
+            font-size: 0.95rem;
+          }
+          button, input, select {
+            font-size: 0.95rem !important;
+            padding: 4px 8px !important;
+          }
+        }
+        body {
+          overflow-x: hidden;
+        }
+      `}</style>
     </div>
   )
 }
