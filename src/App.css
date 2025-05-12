@@ -54,7 +54,6 @@ body {
 .container, main, section, .pitch-graph-container {
   min-width: 0;
   box-sizing: border-box;
-  border: 1px solid red;
 }
 
 .container {
@@ -104,10 +103,9 @@ body {
     box-sizing: border-box;
     padding: 0;
     margin: 0;
-    border: 1px solid blue;
   }
   main, section {
-    border: 1px solid green;
+    /* Remove debug borders */
   }
   main {
     padding: 1rem 0 !important;
@@ -147,4 +145,9 @@ main *, section *, .graph-container * {
   max-width: 100%;
   box-sizing: border-box;
   overflow-x: hidden;
+}
+
+/* Remove debug logs */
+.debug-log {
+  display: none;
 }

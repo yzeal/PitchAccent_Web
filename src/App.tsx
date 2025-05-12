@@ -364,7 +364,6 @@ const App: React.FC = () => {
     };
   }, [audioBlob]);
 
-  console.log('App render loopStart/loopEnd', loopStart, loopEnd);
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
@@ -435,7 +434,6 @@ const App: React.FC = () => {
                     value={loopStart}
                     onChange={e => {
                       const newStart = Number(e.target.value);
-                      console.log('Slider loopStart changed:', newStart);
                       setLoopStart(newStart);
                       if (newStart > loopEnd) setLoopEnd(newStart);
                     }}
@@ -460,7 +458,6 @@ const App: React.FC = () => {
                     value={loopEnd}
                     onChange={e => {
                       const newEnd = Number(e.target.value);
-                      console.log('Slider loopEnd changed:', newEnd);
                       setLoopEnd(newEnd);
                       if (newEnd < loopStart) setLoopStart(newEnd);
                     }}
@@ -478,12 +475,28 @@ const App: React.FC = () => {
                   />
                   <span style={{ fontSize: 12 }}>{loopEnd.toFixed(2)}s</span>
                   <button
-                    style={{ fontSize: 12, padding: '2px 8px', marginLeft: 8 }}
                     onClick={() => {
-                      setLoopStart(0)
-                      setLoopEnd(nativePitchData.times[nativePitchData.times.length - 1])
+                      const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
+                      setLoopStart(0);
+                      setLoopEnd(duration);
                     }}
-                  >Reset</button>
+                    title="Reset Loop Region"
+                    style={{
+                      padding: '2px 6px',
+                      borderRadius: '50%',
+                      border: 'none',
+                      background: 'transparent',
+                      color: '#1976d2',
+                      fontSize: '1.1rem',
+                      cursor: 'pointer',
+                      minWidth: 0,
+                      minHeight: 0,
+                      lineHeight: 1,
+                      marginLeft: 8,
+                    }}
+                  >
+                    ↺
+                  </button>
                 </div>
                 <div style={{ width: '100%', maxWidth: 400, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 12 }}>Loop delay (ms):</span>
