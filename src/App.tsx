@@ -29,6 +29,17 @@ const MAX_PITCH = 500
 const MIN_CLARITY = 0.8
 const MEDIAN_FILTER_SIZE = 5
 
+// Type definitions
+interface AudioContextType extends AudioContext {
+  decodeAudioData: (arrayBuffer: ArrayBuffer) => Promise<AudioBuffer>;
+}
+
+declare global {
+  interface Window {
+    webkitAudioContext: typeof AudioContext;
+  }
+}
+
 const App: React.FC = () => {
   // User pitch data
   const [userPitchData, setUserPitchData] = useState<{ times: number[]; pitches: (number | null)[] }>({ times: [], pitches: [] })
@@ -47,7 +58,7 @@ const App: React.FC = () => {
     const extract = async () => {
       try {
         const arrayBuffer = await audioBlob.arrayBuffer();
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)() as AudioContextType;
         const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
         const channelData = audioBuffer.getChannelData(0);
         const sampleRate = audioBuffer.sampleRate;
@@ -68,7 +79,8 @@ const App: React.FC = () => {
         }
         const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
         setUserPitchData({ times, pitches: smoothed });
-      } catch (e) {
+      } catch (error) {
+        console.error('Error extracting pitch:', error);
         setUserPitchData({ times: [], pitches: [] });
       }
     };
@@ -79,9 +91,9 @@ const App: React.FC = () => {
   const extractPitchFromAudioBlob = async (blob: Blob) => {
     try {
       const arrayBuffer = await blob.arrayBuffer()
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)() as AudioContextType
       const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer)
-      const channelData = audioBuffer.getChannelData(0) // Use first channel
+      const channelData = audioBuffer.getChannelData(0)
       const sampleRate = audioBuffer.sampleRate
       const frameSize = 2048
       const hopSize = 256
@@ -100,7 +112,8 @@ const App: React.FC = () => {
       }
       const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE)
       setNativePitchData({ times, pitches: smoothed })
-    } catch (e) {
+    } catch (error) {
+      console.error('Error extracting pitch from audio:', error);
       setNativePitchData({ times: [], pitches: [] })
     }
   }
@@ -116,14 +129,11 @@ const App: React.FC = () => {
       await extractPitchFromAudioBlob(file)
     } else if (file.type.startsWith('video/')) {
       setNativeMediaType('video')
-      // Extract audio from video using MediaSource Extensions (browser support required)
       try {
-        // Try to decode audio from video file
         const arrayBuffer = await file.arrayBuffer()
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)()
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)() as AudioContextType
         const videoBuffer = await audioCtx.decodeAudioData(arrayBuffer).catch(() => null)
         if (videoBuffer) {
-          // Some browsers can decode audio from video directly
           const channelData = videoBuffer.getChannelData(0)
           const sampleRate = videoBuffer.sampleRate
           const frameSize = 2048
@@ -144,10 +154,10 @@ const App: React.FC = () => {
           const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE)
           setNativePitchData({ times, pitches: smoothed })
         } else {
-          // Fallback: cannot extract audio from video in browser
           setNativePitchData({ times: [], pitches: [] })
         }
-      } catch (err) {
+      } catch (error) {
+        console.error('Error extracting pitch from video:', error);
         setNativePitchData({ times: [], pitches: [] })
       }
     } else {
@@ -173,11 +183,10 @@ const App: React.FC = () => {
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
         <Header />
-        <main style={{ flex: 1, padding: '2rem 0', width: '100%' }}>
-          {/* Controls and graph will go here */}
+        <main style={{ flex: 1, padding: '1rem 0', width: '100%' }}>
           {/* Native Recording Section */}
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>Native Recording</h2>
+          <section style={{ marginBottom: '1rem' }}>
+            <h2 style={{ fontSize: '1.5rem', margin: '0.5rem 0' }}>Native Recording</h2>
             <input
               type="file"
               accept="audio/*,video/*"
@@ -187,33 +196,62 @@ const App: React.FC = () => {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              style={{ padding: '8px 20px', borderRadius: 4, border: 'none', background: '#388e3c', color: '#fff', fontWeight: 500, cursor: 'pointer', marginBottom: 16 }}
+              style={{
+                padding: '8px 20px',
+                borderRadius: 4,
+                border: 'none',
+                background: '#388e3c',
+                color: '#fff',
+                fontWeight: 500,
+                cursor: 'pointer',
+                marginBottom: '0.75rem',
+                fontSize: '1rem'
+              }}
             >
               Load Native Recording
             </button>
             {nativeMediaUrl && nativeMediaType === 'audio' && (
-              <audio src={nativeMediaUrl} controls style={{ width: '100%', marginBottom: 16 }} />
+              <audio
+                src={nativeMediaUrl}
+                controls
+                style={{
+                  width: '100%',
+                  marginBottom: '0.75rem',
+                  maxWidth: '100%'
+                }}
+              />
             )}
             {nativeMediaUrl && nativeMediaType === 'video' && (
-              <video ref={nativeVideoRef} src={nativeMediaUrl} controls style={{ width: '100%', maxHeight: 240, marginBottom: 16 }} />
+              <video
+                ref={nativeVideoRef}
+                src={nativeMediaUrl}
+                controls
+                style={{
+                  width: '100%',
+                  maxHeight: '240px',
+                  marginBottom: '0.75rem',
+                  maxWidth: '100%'
+                }}
+              />
             )}
             <PitchGraphWithControls
-              times={nativePitchData.times || []}
-              pitches={nativePitchData.pitches || []}
+              times={nativePitchData.times}
+              pitches={nativePitchData.pitches}
               label="Native Pitch (Hz)"
               color="#388e3c"
             />
           </section>
+
           {/* User Recording Section */}
-          <section style={{ marginBottom: '2rem' }}>
-            <h2>User Recording</h2>
+          <section>
+            <h2 style={{ fontSize: '1.5rem', margin: '0.5rem 0' }}>Your Recording</h2>
+            <Recorder onRecordingComplete={(_, blob) => setAudioBlob(blob)} />
             <PitchGraphWithControls
-              times={userPitchData.times || []}
-              pitches={userPitchData.pitches || []}
-              label="User Pitch (Hz)"
+              times={userPitchData.times}
+              pitches={userPitchData.pitches}
+              label="Your Pitch (Hz)"
               color="#1976d2"
             />
-            <Recorder onRecordingComplete={(_, blob) => { setAudioBlob(blob); }} />
           </section>
         </main>
         <Footer />
