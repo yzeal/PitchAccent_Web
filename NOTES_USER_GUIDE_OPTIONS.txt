@@ -6,6 +6,8 @@
 - On iOS, pitch extraction from .mov and some video files may not work; recommend using .mp3, .wav, or .m4a audio files or converting videos before use
 - All browsers on iOS (Safari, Chrome, Firefox, etc.) have the same audio and media limitations due to WebKit; there is no workaround in web apps
 - If audio output volume is stuck after recording on iOS, try reloading the page or closing the tab to restore normal volume control
+- **Initial audio quality in browser:**
+  Sometimes, when playing audio or video for the first time in the browser, the quality may be lower or have artifacts for the first second or two. This is due to browser/decoder warmup and usually self-corrects quickly. Possible improvements include waiting for the `canplaythrough` event before playback, but this is a common browser limitation. Consider mentioning this in the user guide as a known issue.
 
 ## Options Menu (future ideas)
 - Customizable loop delay for native and user recordings
