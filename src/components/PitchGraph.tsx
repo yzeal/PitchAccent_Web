@@ -90,7 +90,7 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
 
   if (!audioBlob) {
     return (
-      <div style={{ height: 200, background: '#eee', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: 18 }}>
+      <div style={{ width: '100%', height: 380, background: '#eee', borderRadius: 8, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: 18 }}>
         Pitch graph will appear here
       </div>
     );
@@ -98,7 +98,7 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
 
   if (loading) {
     return (
-      <div style={{ height: 200, background: '#eee', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: 18 }}>
+      <div style={{ width: '100%', height: 380, background: '#eee', borderRadius: 8, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#aaa', fontSize: 18 }}>
         Analyzing pitch...
       </div>
     );
@@ -106,13 +106,15 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
 
   if (!pitchData) {
     return (
-      <div style={{ height: 200, background: '#eee', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f44336', fontSize: 18 }}>
+      <div style={{ width: '100%', height: 380, background: '#eee', borderRadius: 8, padding: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f44336', fontSize: 18 }}>
         Could not extract pitch.
       </div>
     );
   }
 
   // Prepare data for Chart.js
+  const lastTime = pitchData.times.length > 0 ? pitchData.times[pitchData.times.length - 1] : 5;
+  const xMax = Math.max(2, lastTime);
   const chartData = {
     labels: pitchData.times,
     datasets: [
@@ -131,6 +133,7 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
 
   const options = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
       title: { display: false },
@@ -141,6 +144,8 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
         type: 'linear' as const,
         title: { display: true, text: 'Time (s)' },
         ticks: { maxTicksLimit: 8 },
+        min: 0,
+        max: xMax,
       },
       y: {
         title: { display: true, text: 'Pitch (Hz)' },
@@ -154,8 +159,8 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
   };
 
   return (
-    <div style={{ height: 220, background: '#fff', borderRadius: 8, padding: 8 }}>
-      <Line data={chartData} options={options} height={200} />
+    <div style={{ width: '100%', height: 380, background: '#fff', borderRadius: 8, padding: 8 }}>
+      <Line data={chartData} options={options} />
     </div>
   );
 };
