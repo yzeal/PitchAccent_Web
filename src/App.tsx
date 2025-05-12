@@ -56,6 +56,8 @@ const App: React.FC = () => {
   const [loopStart, setLoopStart] = useState(0)
   const [loopEnd, setLoopEnd] = useState(0)
   const [loopDelay, setLoopDelay] = useState(0)
+  const [loopYFit, setLoopYFit] = useState<[number, number] | null>(null)
+  const draggingRef = useRef(false)
 
   // Extract pitch from user recording when audioBlob changes
   React.useEffect(() => {
@@ -230,6 +232,84 @@ const App: React.FC = () => {
     };
   }, [nativeMediaUrl, loopStart, loopEnd, loopDelay, nativeMediaType]);
 
+  // On initial load or when nativePitchData changes, fit y axis to full pitch curve
+  React.useEffect(() => {
+    if (!nativePitchData.pitches.length) return;
+    const pitches = nativePitchData.pitches.filter(p => p !== null) as number[];
+    if (pitches.length > 0) {
+      let minPitch = Math.min(...pitches);
+      let maxPitch = Math.max(...pitches);
+      minPitch = Math.floor(minPitch - 20);
+      maxPitch = Math.ceil(maxPitch + 20);
+      minPitch = Math.max(0, minPitch);
+      maxPitch = Math.min(600, maxPitch);
+      if (maxPitch - minPitch < 200) {
+        const center = (maxPitch + minPitch) / 2;
+        minPitch = Math.max(0, Math.floor(center - 100));
+        maxPitch = Math.min(600, Math.ceil(center + 100));
+      }
+      if (maxPitch - minPitch > 600) {
+        const center = (maxPitch + minPitch) / 2;
+        minPitch = Math.max(0, Math.floor(center - 300));
+        maxPitch = Math.min(600, Math.ceil(center + 300));
+      }
+      setLoopYFit([minPitch, maxPitch]);
+    }
+  }, [nativePitchData.pitches]);
+
+  // Function to fit y axis to the current loop region
+  function fitYAxisToLoop() {
+    if (!nativePitchData.times.length) return;
+    const startIdx = nativePitchData.times.findIndex(t => t >= loopStart);
+    const endIdx = nativePitchData.times.findIndex(t => t >= loopEnd);
+    const pitches = nativePitchData.pitches.slice(
+      startIdx >= 0 ? startIdx : 0,
+      endIdx > 0 ? endIdx : nativePitchData.pitches.length
+    ).filter(p => p !== null) as number[];
+    if (pitches.length > 0) {
+      let minPitch = Math.min(...pitches);
+      let maxPitch = Math.max(...pitches);
+      minPitch = Math.floor(minPitch - 20);
+      maxPitch = Math.ceil(maxPitch + 20);
+      minPitch = Math.max(0, minPitch);
+      maxPitch = Math.min(600, maxPitch);
+      if (maxPitch - minPitch < 200) {
+        const center = (maxPitch + minPitch) / 2;
+        minPitch = Math.max(0, Math.floor(center - 100));
+        maxPitch = Math.min(600, Math.ceil(center + 100));
+      }
+      if (maxPitch - minPitch > 600) {
+        const center = (maxPitch + minPitch) / 2;
+        minPitch = Math.max(0, Math.floor(center - 300));
+        maxPitch = Math.min(600, Math.ceil(center + 300));
+      }
+      setLoopYFit([minPitch, maxPitch]);
+    } else {
+      // If region is empty, fit to full pitch curve
+      const allPitches = nativePitchData.pitches.filter(p => p !== null) as number[];
+      if (allPitches.length > 0) {
+        let minPitch = Math.min(...allPitches);
+        let maxPitch = Math.max(...allPitches);
+        minPitch = Math.floor(minPitch - 20);
+        maxPitch = Math.ceil(maxPitch + 20);
+        minPitch = Math.max(0, minPitch);
+        maxPitch = Math.min(600, maxPitch);
+        if (maxPitch - minPitch < 200) {
+          const center = (maxPitch + minPitch) / 2;
+          minPitch = Math.max(0, Math.floor(center - 100));
+          maxPitch = Math.min(600, Math.ceil(center + 100));
+        }
+        if (maxPitch - minPitch > 600) {
+          const center = (maxPitch + minPitch) / 2;
+          minPitch = Math.max(0, Math.floor(center - 300));
+          maxPitch = Math.min(600, Math.ceil(center + 300));
+        }
+        setLoopYFit([minPitch, maxPitch]);
+      }
+    }
+  }
+
+  console.log('App render loopStart/loopEnd', loopStart, loopEnd);
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
@@ -298,7 +378,22 @@ const App: React.FC = () => {
                     max={nativePitchData.times[nativePitchData.times.length - 1]}
                     step={0.01}
                     value={loopStart}
-                    onChange={e => setLoopStart(Number(e.target.value))}
+                    onChange={e => {
+                      const newStart = Number(e.target.value);
+                      console.log('Slider loopStart changed:', newStart);
+                      setLoopStart(newStart);
+                      if (newStart > loopEnd) setLoopEnd(newStart);
+                    }}
+                    onMouseDown={() => { draggingRef.current = true; }}
+                    onTouchStart={() => { draggingRef.current = true; }}
+                    onMouseUp={() => {
+                      draggingRef.current = false;
+                      fitYAxisToLoop();
+                    }}
+                    onTouchEnd={() => {
+                      draggingRef.current = false;
+                      fitYAxisToLoop();
+                    }}
                     style={{ flex: 1 }}
                   />
                   <span style={{ fontSize: 12 }}>{loopStart.toFixed(2)}s</span>
@@ -308,7 +403,22 @@ const App: React.FC = () => {
                     max={nativePitchData.times[nativePitchData.times.length - 1]}
                     step={0.01}
                     value={loopEnd}
-                    onChange={e => setLoopEnd(Number(e.target.value))}
+                    onChange={e => {
+                      const newEnd = Number(e.target.value);
+                      console.log('Slider loopEnd changed:', newEnd);
+                      setLoopEnd(newEnd);
+                      if (newEnd < loopStart) setLoopStart(newEnd);
+                    }}
+                    onMouseDown={() => { draggingRef.current = true; }}
+                    onTouchStart={() => { draggingRef.current = true; }}
+                    onMouseUp={() => {
+                      draggingRef.current = false;
+                      fitYAxisToLoop();
+                    }}
+                    onTouchEnd={() => {
+                      draggingRef.current = false;
+                      fitYAxisToLoop();
+                    }}
                     style={{ flex: 1 }}
                   />
                   <span style={{ fontSize: 12 }}>{loopEnd.toFixed(2)}s</span>
@@ -339,6 +449,9 @@ const App: React.FC = () => {
               pitches={nativePitchData.pitches}
               label="Native Pitch (Hz)"
               color="#388e3c"
+              loopStart={loopStart}
+              loopEnd={loopEnd}
+              yFit={loopYFit}
             />
           </section>
 

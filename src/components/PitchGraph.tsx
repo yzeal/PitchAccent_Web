@@ -9,16 +9,34 @@ import {
   Tooltip,
   Legend,
   CategoryScale,
+  Chart,
 } from 'chart.js';
+import type { Plugin, ChartTypeRegistry } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 
 ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale, zoomPlugin);
+
+// Define plugin options type
+interface LoopOverlayOptions {
+  loopStart?: number;
+  loopEnd?: number;
+}
+
+// Extend Chart.js types to include our plugin
+declare module 'chart.js' {
+  interface PluginOptionsByType<TType extends keyof ChartTypeRegistry> {
+    loopOverlay?: LoopOverlayOptions;
+  }
+}
 
 export interface PitchGraphWithControlsProps {
   times: number[];
   pitches: (number | null)[];
   label?: string;
   color?: string;
+  loopStart?: number;
+  loopEnd?: number;
+  yFit?: [number, number] | null;
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -31,40 +49,53 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
   pitches,
   label = 'Pitch (Hz)',
   color = '#1976d2',
+  loopStart,
+  loopEnd,
+  yFit,
 }) => {
-  const chartRef = useRef<any>(null);
+  const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
   const [yRange, setYRange] = useState<[number, number]>([Y_MIN_LIMIT, Y_MAX_LIMIT]);
 
+  // Update chart options when loop values change
   useEffect(() => {
-    // Auto-range to min/max of curve, but clamp to at least 200 Hz and at most 600 Hz
-    const validPitches = pitches.filter((p) => p !== null) as number[];
-    if (validPitches.length > 0) {
-      let minPitch = Math.min(...validPitches);
-      let maxPitch = Math.max(...validPitches);
-      // Add padding
-      minPitch = Math.floor(minPitch - 20);
-      maxPitch = Math.ceil(maxPitch + 20);
-      // Clamp to limits
-      minPitch = Math.max(Y_MIN_LIMIT, minPitch);
-      maxPitch = Math.min(Y_MAX_LIMIT, maxPitch);
-      // Ensure at least MIN_VISIBLE_RANGE is visible
-      if (maxPitch - minPitch < MIN_VISIBLE_RANGE) {
-        const center = (maxPitch + minPitch) / 2;
-        minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MIN_VISIBLE_RANGE / 2));
-        maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MIN_VISIBLE_RANGE / 2));
-      }
-      // Ensure at most MAX_VISIBLE_RANGE is visible
-      if (maxPitch - minPitch > MAX_VISIBLE_RANGE) {
-        const center = (maxPitch + minPitch) / 2;
-        minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MAX_VISIBLE_RANGE / 2));
-        maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MAX_VISIBLE_RANGE / 2));
-      }
-      setYRange([minPitch, maxPitch]);
-    } else {
-      setYRange([Y_MIN_LIMIT, Y_MIN_LIMIT + MIN_VISIBLE_RANGE]);
+    const chart = chartRef.current;
+    if (chart?.options?.plugins) {
+      // Update plugin options
+      chart.options.plugins.loopOverlay = { loopStart, loopEnd };
+      // Force update without animation
+      chart.update('none');
     }
-    // eslint-disable-next-line
-  }, [times, pitches]);
+  }, [loopStart, loopEnd]);
+
+  useEffect(() => {
+    if (yFit && yFit.length === 2) {
+      setYRange(yFit);
+    } else {
+      // Default: fit to all pitches
+      const validPitches = pitches.filter((p) => p !== null) as number[];
+      if (validPitches.length > 0) {
+        let minPitch = Math.min(...validPitches);
+        let maxPitch = Math.max(...validPitches);
+        minPitch = Math.floor(minPitch - 20);
+        maxPitch = Math.ceil(maxPitch + 20);
+        minPitch = Math.max(Y_MIN_LIMIT, minPitch);
+        maxPitch = Math.min(Y_MAX_LIMIT, maxPitch);
+        if (maxPitch - minPitch < MIN_VISIBLE_RANGE) {
+          const center = (maxPitch + minPitch) / 2;
+          minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MIN_VISIBLE_RANGE / 2));
+          maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MIN_VISIBLE_RANGE / 2));
+        }
+        if (maxPitch - minPitch > MAX_VISIBLE_RANGE) {
+          const center = (maxPitch + minPitch) / 2;
+          minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MAX_VISIBLE_RANGE / 2));
+          maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MAX_VISIBLE_RANGE / 2));
+        }
+        setYRange([minPitch, maxPitch]);
+      } else {
+        setYRange([Y_MIN_LIMIT, Y_MIN_LIMIT + MIN_VISIBLE_RANGE]);
+      }
+    }
+  }, [pitches, yFit]);
 
   const lastTime = times.length > 0 ? times[times.length - 1] : 5;
   const xMax = Math.max(2, lastTime);
@@ -81,6 +112,67 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
         borderWidth: 2,
       },
     ],
+  };
+
+  // Overlay plugin for loop region
+  const loopOverlayPlugin: Plugin<'line'> = {
+    id: 'loopOverlay',
+    beforeDatasetsDraw: (chart: Chart) => {
+      const options = chart.options.plugins?.loopOverlay;
+      if (!options) return;
+      
+      const ls = options.loopStart;
+      const le = options.loopEnd;
+      
+      if (ls == null || le == null) return;
+      
+      const xScale = chart.scales.x;
+      const yScale = chart.scales.y;
+      const ctx = chart.ctx;
+      
+      // Draw semi-transparent overlay outside loop region
+      ctx.save();
+      
+      // Left side (before loop start)
+      if (ls > xScale.min) {
+        ctx.fillStyle = 'rgba(0, 0, 255, 0.1)';
+        ctx.fillRect(
+          xScale.getPixelForValue(xScale.min),
+          yScale.top,
+          xScale.getPixelForValue(ls) - xScale.getPixelForValue(xScale.min),
+          yScale.bottom - yScale.top
+        );
+      }
+      
+      // Right side (after loop end)
+      if (le < xScale.max) {
+        ctx.fillStyle = 'rgba(0, 0, 255, 0.1)';
+        ctx.fillRect(
+          xScale.getPixelForValue(le),
+          yScale.top,
+          xScale.getPixelForValue(xScale.max) - xScale.getPixelForValue(le),
+          yScale.bottom - yScale.top
+        );
+      }
+      
+      // Draw loop region borders
+      ctx.strokeStyle = 'rgba(0, 0, 255, 0.5)';
+      ctx.lineWidth = 1;
+      
+      // Left border
+      ctx.beginPath();
+      ctx.moveTo(xScale.getPixelForValue(ls), yScale.top);
+      ctx.lineTo(xScale.getPixelForValue(ls), yScale.bottom);
+      ctx.stroke();
+      
+      // Right border
+      ctx.beginPath();
+      ctx.moveTo(xScale.getPixelForValue(le), yScale.top);
+      ctx.lineTo(xScale.getPixelForValue(le), yScale.bottom);
+      ctx.stroke();
+      
+      ctx.restore();
+    },
   };
 
   const options = {
@@ -104,6 +196,10 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
         limits: {
           x: { min: 0, max: xMax },
         },
+      },
+      loopOverlay: {
+        loopStart,
+        loopEnd,
       },
     },
     scales: {
@@ -150,7 +246,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
         }}
         className="pitch-graph-container"
       >
-        <Line ref={chartRef} data={chartData} options={options} />
+        <Line ref={chartRef} data={chartData} options={options} plugins={[loopOverlayPlugin]} />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button
