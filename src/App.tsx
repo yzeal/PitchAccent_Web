@@ -442,10 +442,16 @@ const App: React.FC = () => {
                     onMouseUp={() => {
                       draggingRef.current = false;
                       fitYAxisToLoop();
+                      if (nativeVideoRef.current) {
+                        nativeVideoRef.current.currentTime = loopStart;
+                      }
                     }}
                     onTouchEnd={() => {
                       draggingRef.current = false;
                       fitYAxisToLoop();
+                      if (nativeVideoRef.current) {
+                        nativeVideoRef.current.currentTime = loopStart;
+                      }
                     }}
                     style={{ flex: 1 }}
                   />
@@ -466,10 +472,16 @@ const App: React.FC = () => {
                     onMouseUp={() => {
                       draggingRef.current = false;
                       fitYAxisToLoop();
+                      if (nativeVideoRef.current) {
+                        nativeVideoRef.current.currentTime = loopStart;
+                      }
                     }}
                     onTouchEnd={() => {
                       draggingRef.current = false;
                       fitYAxisToLoop();
+                      if (nativeVideoRef.current) {
+                        nativeVideoRef.current.currentTime = loopStart;
+                      }
                     }}
                     style={{ flex: 1 }}
                   />
