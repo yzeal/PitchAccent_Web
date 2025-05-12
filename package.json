@@ -15,6 +15,7 @@
     "@mui/material": "^7.1.0",
     "@types/node": "^22.15.17",
     "chart.js": "^4.4.9",
+    "chartjs-plugin-zoom": "^2.2.0",
     "pitchy": "^4.1.0",
     "react": "^19.1.0",
     "react-chartjs-2": "^5.3.0",

@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from 'react';
-import { useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { PitchDetector } from 'pitchy';
 import { Line } from 'react-chartjs-2';
 import {
@@ -12,8 +11,9 @@ import {
   Legend,
   CategoryScale,
 } from 'chart.js';
+import zoomPlugin from 'chartjs-plugin-zoom';
 
-ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale);
+ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale, zoomPlugin);
 
 interface PitchGraphProps {
   audioBlob: Blob | null;
@@ -46,6 +46,7 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
   const [pitchData, setPitchData] = useState<{ times: number[]; pitches: (number | null)[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const lastBlob = useRef<Blob | null>(null);
+  const chartRef = useRef<any>(null);
 
   useEffect(() => {
     if (!audioBlob || audioBlob === lastBlob.current) return;
@@ -138,6 +139,22 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
       legend: { display: false },
       title: { display: false },
       tooltip: { enabled: true },
+      zoom: {
+        pan: {
+          enabled: true,
+          mode: 'x' as const,
+          modifierKey: null,
+        },
+        zoom: {
+          wheel: { enabled: true },
+          pinch: { enabled: true, speed: 0.01 },
+          mode: 'x' as const,
+        },
+        limits: {
+          x: { min: 0, max: xMax },
+          y: { min: 0, max: 600 },
+        },
+      },
     },
     scales: {
       x: {
@@ -158,9 +175,20 @@ const PitchGraph: React.FC<PitchGraphProps> = ({ audioBlob }) => {
     },
   };
 
+  const handleResetZoom = () => {
+    if (chartRef.current) {
+      chartRef.current.resetZoom();
+    }
+  };
+
   return (
     <div style={{ width: '100%', height: 380, background: '#fff', borderRadius: 8, padding: 8 }}>
-      <Line data={chartData} options={options} />
+      <Line ref={chartRef} data={chartData} options={options} />
+      <div style={{ textAlign: 'right', marginTop: 8 }}>
+        <button onClick={handleResetZoom} style={{ padding: '6px 16px', borderRadius: 4, border: 'none', background: '#1976d2', color: '#fff', cursor: 'pointer' }}>
+          Reset Zoom
+        </button>
+      </div>
     </div>
   );
 };
