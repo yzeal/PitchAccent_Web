@@ -11,8 +11,6 @@ import {
   CategoryScale,
 } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
-import Slider from '@mui/material/Slider';
-import TextField from '@mui/material/TextField';
 
 ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale, zoomPlugin);
 
@@ -21,46 +19,49 @@ export interface PitchGraphWithControlsProps {
   pitches: (number | null)[];
   label?: string;
   color?: string;
-  initialYRange?: [number, number];
-  yMinLimit?: number;
-  yMaxLimit?: number;
-  yRangeMin?: number;
-  yRangeMax?: number;
 }
 
-const DEFAULT_Y_MIN_LIMIT = 0;
-const DEFAULT_Y_MAX_LIMIT = 600;
-const DEFAULT_Y_RANGE_MIN = 200;
-const DEFAULT_Y_RANGE_MAX = 600;
+const MIN_VISIBLE_RANGE = 200;
+const MAX_VISIBLE_RANGE = 600;
+const Y_MIN_LIMIT = 0;
+const Y_MAX_LIMIT = 600;
 
 const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
   times,
   pitches,
   label = 'Pitch (Hz)',
   color = '#1976d2',
-  initialYRange,
-  yMinLimit = DEFAULT_Y_MIN_LIMIT,
-  yMaxLimit = DEFAULT_Y_MAX_LIMIT,
-  yRangeMin = DEFAULT_Y_RANGE_MIN,
-  yRangeMax = DEFAULT_Y_RANGE_MAX,
 }) => {
   const chartRef = useRef<any>(null);
-  // y-axis range state
-  const [yRange, setYRange] = useState<[number, number]>(
-    initialYRange || [yRangeMin, yRangeMax]
-  );
+  const [yRange, setYRange] = useState<[number, number]>([Y_MIN_LIMIT, Y_MAX_LIMIT]);
 
   useEffect(() => {
-    // If times or pitches change, auto-range to min/max of curve + 50 Hz padding
+    // Auto-range to min/max of curve, but clamp to at least 200 Hz and at most 600 Hz
     const validPitches = pitches.filter((p) => p !== null) as number[];
     if (validPitches.length > 0) {
-      const minPitch = Math.min(...validPitches);
-      const maxPitch = Math.max(...validPitches);
-      const paddedMin = Math.max(yMinLimit, Math.floor(minPitch - 50));
-      const paddedMax = Math.min(yMaxLimit, Math.ceil(maxPitch + 50));
-      setYRange([paddedMin, paddedMax]);
+      let minPitch = Math.min(...validPitches);
+      let maxPitch = Math.max(...validPitches);
+      // Add padding
+      minPitch = Math.floor(minPitch - 20);
+      maxPitch = Math.ceil(maxPitch + 20);
+      // Clamp to limits
+      minPitch = Math.max(Y_MIN_LIMIT, minPitch);
+      maxPitch = Math.min(Y_MAX_LIMIT, maxPitch);
+      // Ensure at least MIN_VISIBLE_RANGE is visible
+      if (maxPitch - minPitch < MIN_VISIBLE_RANGE) {
+        const center = (maxPitch + minPitch) / 2;
+        minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MIN_VISIBLE_RANGE / 2));
+        maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MIN_VISIBLE_RANGE / 2));
+      }
+      // Ensure at most MAX_VISIBLE_RANGE is visible
+      if (maxPitch - minPitch > MAX_VISIBLE_RANGE) {
+        const center = (maxPitch + minPitch) / 2;
+        minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MAX_VISIBLE_RANGE / 2));
+        maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MAX_VISIBLE_RANGE / 2));
+      }
+      setYRange([minPitch, maxPitch]);
     } else {
-      setYRange([yRangeMin, yRangeMax]);
+      setYRange([Y_MIN_LIMIT, Y_MIN_LIMIT + MIN_VISIBLE_RANGE]);
     }
     // eslint-disable-next-line
   }, [times, pitches]);
@@ -102,20 +103,20 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
         },
         limits: {
           x: { min: 0, max: xMax },
-          y: { min: yMinLimit, max: yMaxLimit },
         },
       },
     },
     scales: {
       x: {
         type: 'linear' as const,
-        title: { display: true, text: 'Time (s)' },
-        ticks: { maxTicksLimit: 8 },
+        title: { display: false },
+        ticks: { maxTicksLimit: 8, font: { size: 10 } },
         min: 0,
         max: xMax,
       },
       y: {
-        title: { display: true, text: 'Pitch (Hz)' },
+        title: { display: false },
+        ticks: { font: { size: 10 } },
         min: yRange[0],
         max: yRange[1],
       },
@@ -131,63 +132,59 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     }
   };
 
-  // Slider/input handlers
-  const handleSliderChange = (_: any, newValue: number | number[]) => {
-    if (Array.isArray(newValue)) {
-      setYRange([Math.min(...newValue), Math.max(...newValue)]);
-    }
-  };
-  const handleInputChange = (index: 0 | 1) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = Number(e.target.value);
-    if (isNaN(value)) value = yRange[index];
-    value = Math.max(yMinLimit, Math.min(yMaxLimit, value));
-    const newRange: [number, number] = [...yRange] as [number, number];
-    newRange[index] = value;
-    // Ensure min <= max
-    if (newRange[0] > newRange[1]) {
-      if (index === 0) newRange[1] = value;
-      else newRange[0] = value;
-    }
-    setYRange([Math.min(...newRange), Math.max(...newRange)]);
-  };
-
   return (
-    <div style={{ width: '100%', background: '#fff', borderRadius: 8, padding: 8, marginBottom: 24 }}>
-      <div style={{ height: 320 }}>
+    <div
+      style={{
+        width: '100%',
+        background: '#fff',
+        borderRadius: 8,
+        padding: 8,
+        marginBottom: 24,
+      }}
+    >
+      <div
+        style={{
+          height: 150,
+          width: '100%',
+          maxWidth: '100%',
+        }}
+        className="pitch-graph-container"
+      >
         <Line ref={chartRef} data={chartData} options={options} />
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 16, flexWrap: 'wrap' }}>
-        <span style={{ fontWeight: 500 }}>Pitch range (Hz):</span>
-        <TextField
-          size="small"
-          type="number"
-          label="Min"
-          value={yRange[0]}
-          onChange={handleInputChange(0)}
-          inputProps={{ min: yMinLimit, max: yRange[1], step: 1, style: { width: 60 } }}
-        />
-        <Slider
-          value={yRange}
-          onChange={handleSliderChange}
-          min={yMinLimit}
-          max={yMaxLimit}
-          step={1}
-          valueLabelDisplay="auto"
-          sx={{ width: 220 }}
-        />
-        <TextField
-          size="small"
-          type="number"
-          label="Max"
-          value={yRange[1]}
-          onChange={handleInputChange(1)}
-          inputProps={{ min: yRange[0], max: yMaxLimit, step: 1, style: { width: 60 } }}
-        />
-        <div style={{ flex: 1 }} />
-        <button onClick={handleResetZoom} style={{ padding: '6px 16px', borderRadius: 4, border: 'none', background: '#1976d2', color: '#fff', cursor: 'pointer' }}>
-          Reset Zoom
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+        <button
+          onClick={handleResetZoom}
+          title="Reset Zoom"
+          style={{
+            padding: '2px 6px',
+            borderRadius: '50%',
+            border: 'none',
+            background: 'transparent',
+            color: '#1976d2',
+            fontSize: '1.1rem',
+            cursor: 'pointer',
+            minWidth: 0,
+            minHeight: 0,
+            lineHeight: 1,
+          }}
+        >
+          ↺
         </button>
       </div>
+      <style>{`
+        .pitch-graph-container {
+          touch-action: pinch-zoom pan-x pan-y;
+        }
+        @media (max-width: 768px) {
+          .pitch-graph-container {
+            touch-action: none;
+            height: 100px !important;
+            min-height: 100px !important;
+            max-height: 100px !important;
+          }
+        }
+      `}</style>
     </div>
   );
 };

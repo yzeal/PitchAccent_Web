@@ -186,7 +186,6 @@ const App: React.FC = () => {
         <main style={{ flex: 1, padding: '1rem 0', width: '100%' }}>
           {/* Native Recording Section */}
           <section style={{ marginBottom: '1rem' }}>
-            <h2 style={{ fontSize: '1.5rem', margin: '0.5rem 0' }}>Native Recording</h2>
             <input
               type="file"
               accept="audio/*,video/*"
@@ -226,9 +225,10 @@ const App: React.FC = () => {
                 ref={nativeVideoRef}
                 src={nativeMediaUrl}
                 controls
+                playsInline
                 style={{
                   width: '100%',
-                  maxHeight: '240px',
+                  maxHeight: '180px',
                   marginBottom: '0.75rem',
                   maxWidth: '100%'
                 }}
@@ -244,14 +244,13 @@ const App: React.FC = () => {
 
           {/* User Recording Section */}
           <section>
-            <h2 style={{ fontSize: '1.5rem', margin: '0.5rem 0' }}>Your Recording</h2>
-            <Recorder onRecordingComplete={(_, blob) => setAudioBlob(blob)} />
             <PitchGraphWithControls
               times={userPitchData.times}
               pitches={userPitchData.pitches}
               label="Your Pitch (Hz)"
               color="#1976d2"
             />
+            <Recorder onRecordingComplete={(_, blob) => setAudioBlob(blob)} />
           </section>
         </main>
         <Footer />
