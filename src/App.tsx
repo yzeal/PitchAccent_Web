@@ -226,6 +226,7 @@ const App: React.FC = () => {
                 src={nativeMediaUrl}
                 controls
                 playsInline
+                loop
                 style={{
                   width: '100%',
                   maxHeight: '180px',
