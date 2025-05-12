@@ -52,6 +52,11 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const nativeVideoRef = useRef<HTMLVideoElement>(null)
 
+  // Loop selection and delay state
+  const [loopStart, setLoopStart] = useState(0)
+  const [loopEnd, setLoopEnd] = useState(0)
+  const [loopDelay, setLoopDelay] = useState(0)
+
   // Extract pitch from user recording when audioBlob changes
   React.useEffect(() => {
     if (!audioBlob) return;
@@ -179,6 +184,52 @@ const App: React.FC = () => {
     }
   }, [nativeMediaUrl, nativeMediaType]);
 
+  // Update loop end when native media is loaded
+  React.useEffect(() => {
+    const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0
+    setLoopStart(0)
+    setLoopEnd(duration)
+  }, [nativePitchData.times])
+
+  // --- Native media loop playback logic ---
+  React.useEffect(() => {
+    const media = nativeVideoRef.current;
+    if (!media || !nativeMediaUrl) return;
+    let timeout: NodeJS.Timeout | null = null;
+
+    const onTimeUpdate = () => {
+      if (media.currentTime >= loopEnd && loopEnd > loopStart) {
+        media.pause();
+        if (timeout) clearTimeout(timeout);
+        timeout = setTimeout(() => {
+          media.currentTime = loopStart;
+          media.play();
+        }, loopDelay);
+      }
+    };
+
+    // Always seek to loopStart if user presses play and currentTime is outside loop
+    const onPlay = () => {
+      if (media.currentTime < loopStart || media.currentTime > loopEnd) {
+        media.currentTime = loopStart;
+      }
+    };
+
+    media.addEventListener('timeupdate', onTimeUpdate);
+    media.addEventListener('play', onPlay);
+
+    // If loop region changes, and media is playing, jump to new loopStart
+    if (media.currentTime < loopStart || media.currentTime > loopEnd) {
+      media.currentTime = loopStart;
+    }
+
+    return () => {
+      media.removeEventListener('timeupdate', onTimeUpdate);
+      media.removeEventListener('play', onPlay);
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [nativeMediaUrl, loopStart, loopEnd, loopDelay, nativeMediaType]);
+
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
@@ -218,6 +269,7 @@ const App: React.FC = () => {
                   marginBottom: '0.75rem',
                   maxWidth: '100%'
                 }}
+                ref={nativeVideoRef as any}
               />
             )}
             {nativeMediaUrl && nativeMediaType === 'video' && (
@@ -234,6 +286,53 @@ const App: React.FC = () => {
                   maxWidth: '100%'
                 }}
               />
+            )}
+            {/* Loop selection and delay controls (moved above the curve) */}
+            {nativePitchData.times.length > 0 && (
+              <div style={{ margin: '0.5rem 0 0.5rem 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                <div style={{ width: '100%', maxWidth: 400, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12 }}>Loop region:</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={nativePitchData.times[nativePitchData.times.length - 1]}
+                    step={0.01}
+                    value={loopStart}
+                    onChange={e => setLoopStart(Number(e.target.value))}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontSize: 12 }}>{loopStart.toFixed(2)}s</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={nativePitchData.times[nativePitchData.times.length - 1]}
+                    step={0.01}
+                    value={loopEnd}
+                    onChange={e => setLoopEnd(Number(e.target.value))}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{ fontSize: 12 }}>{loopEnd.toFixed(2)}s</span>
+                  <button
+                    style={{ fontSize: 12, padding: '2px 8px', marginLeft: 8 }}
+                    onClick={() => {
+                      setLoopStart(0)
+                      setLoopEnd(nativePitchData.times[nativePitchData.times.length - 1])
+                    }}
+                  >Reset</button>
+                </div>
+                <div style={{ width: '100%', maxWidth: 400, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 12 }}>Loop delay (ms):</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={2000}
+                    step={50}
+                    value={loopDelay}
+                    onChange={e => setLoopDelay(Number(e.target.value))}
+                    style={{ width: 60 }}
+                  />
+                </div>
+              </div>
             )}
             <PitchGraphWithControls
               times={nativePitchData.times}
