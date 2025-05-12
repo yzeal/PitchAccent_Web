@@ -67,7 +67,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
       chart.options.plugins.playbackIndicator = { playbackTime };
       chart.update('none');
     }
-  }, [loopStart, loopEnd, playbackTime]);
+  }, [loopStart, loopEnd, playbackTime, yRange]);
 
   useEffect(() => {
     if (yFit && yFit.length === 2) {
@@ -99,8 +99,11 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     }
   }, [pitches, yFit]);
 
-  const lastTime = times.length > 0 ? times[times.length - 1] : 5;
-  const xMax = Math.max(2, lastTime);
+  // Calculate xMax only when times changes
+  const xMax = useMemo(() => {
+    return times.length > 0 ? Math.max(2, times[times.length - 1]) : 5;
+  }, [times]);
+
   const chartData = {
     labels: times,
     datasets: [
@@ -202,6 +205,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     },
   };
 
+  // Memoize options, but do NOT include loopStart/loopEnd
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -224,13 +228,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
           x: { min: 0, max: xMax },
         },
       },
-      loopOverlay: {
-        loopStart,
-        loopEnd,
-      },
-      playbackIndicator: {
-        playbackTime,
-      },
+      // loopOverlay and playbackIndicator will be set via useEffect
     },
     scales: {
       x: {
@@ -250,7 +248,7 @@ const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
     elements: {
       line: { tension: 0.2 },
     },
-  }), [yRange, xMax, loopStart, loopEnd]);
+  }), [yRange, xMax]);
 
   const handleResetZoom = () => {
     if (chartRef.current) {
