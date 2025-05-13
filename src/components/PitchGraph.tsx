@@ -654,7 +654,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           height: 150,
           width: '100%',
           maxWidth: '100%',
-          paddingRight: '80px',
+          paddingRight: '0px',
         }}
         className="pitch-graph-container"
       >
@@ -662,7 +662,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           ...options,
           layout: {
             padding: {
-              right: 40
+              right: 30
             }
           }
         }} plugins={[loopOverlayPlugin, playbackIndicatorPlugin, marginIndicatorPlugin]} />
@@ -699,7 +699,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             height: 100px !important;
             min-height: 100px !important;
             max-height: 100px !important;
-            padding-right: 80px !important;
+            padding-right: 0px !important;
           }
           .pitch-graph-container::-webkit-scrollbar {
             display: none;
