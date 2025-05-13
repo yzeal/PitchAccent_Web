@@ -160,6 +160,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
 
   // Update view range when zoom state changes
   useEffect(() => {
+    console.log('View range update triggered:', { 
+      zoomState: zoomStateRef.current,
+      trigger: 'zoom state change'
+    });
     setViewRange(zoomStateRef.current);
   }, [zoomStateRef.current.min, zoomStateRef.current.max]);
 
@@ -321,10 +325,18 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   };
 
   // Memoize options with zoom preservation
-  const options = useMemo(() => ({
+  const options = useMemo(() => {
+    console.log('Options recalculated:', { 
+      viewRange,
+      playbackTime,
+      trigger: 'options memo'
+    });
+    return ({
     responsive: true,
     maintainAspectRatio: false,
-    animation: false as const,
+    animation: {
+      duration: 0
+    },
     plugins: {
       legend: { display: false },
       title: { display: false },
@@ -344,6 +356,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           },
           mode: 'x',
           onZoomComplete: function(this: Chart, { chart }: { chart: Chart }) {
+            console.log('Zoom complete:', {
+              min: chart.scales.x.min,
+              max: chart.scales.x.max,
+              trigger: 'user zoom'
+            });
             const min = chart.scales.x.min ?? 0;
             const max = chart.scales.x.max ?? xMax;
             
@@ -356,54 +373,18 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             const newRange = { min: validMin, max: validMax };
             zoomStateRef.current = newRange;
             setViewRange(newRange);
-
-            // Update chart scales directly for immediate feedback
-            chart.scales.x.min = validMin;
-            chart.scales.x.max = validMax;
-            if (chart.options.scales?.x) {
-              chart.options.scales.x.min = validMin;
-              chart.options.scales.x.max = validMax;
-            }
-            
-            // Force chart update
-            chart.update('none');
           }
         },
         pan: {
           enabled: true,
-          mode: 'x',
+          mode: 'x' as const,
           modifierKey: undefined,
-          onPanStart: function(this: Chart, { chart }: { chart: Chart }) {
-            // Get the current mouse position
-            const event = chart.ctx.canvas.getAttribute('data-last-event');
-            if (!event) return true; // Allow pan if no event data
-            
-            const mouseEvent = JSON.parse(event) as { x: number; y: number };
-            const xValue = chart.scales.x.getValueForPixel(mouseEvent.x);
-            if (xValue === undefined) return true; // Allow pan if we can't determine position
-            
-            // Get loop region values
-            const loopStart = chart.options.plugins?.loopOverlay?.loopStart ?? 0;
-            const loopEnd = chart.options.plugins?.loopOverlay?.loopEnd ?? xMax;
-            
-            // Check if we're near the edges (use the same threshold as drag controller)
-            const pixelsPerUnit = chart.scales.x.width / (chart.scales.x.max - chart.scales.x.min);
-            const threshold = 20 / pixelsPerUnit; // 20 pixels threshold
-            
-            const nearStart = Math.abs(xValue - loopStart) <= threshold;
-            const nearEnd = Math.abs(xValue - loopEnd) <= threshold;
-            
-            // If near edges, only allow pan with Ctrl key
-            if (nearStart || nearEnd) {
-              const event = chart.ctx.canvas.getAttribute('data-last-event');
-              if (!event) return false;
-              const mouseEvent = JSON.parse(event) as { ctrlKey: boolean };
-              return mouseEvent.ctrlKey;
-            }
-            
-            return true; // Allow pan if not near edges
-          },
           onPanComplete: function(this: Chart, { chart }: { chart: Chart }) {
+            console.log('Pan complete:', {
+              min: chart.scales.x.min,
+              max: chart.scales.x.max,
+              trigger: 'user pan'
+            });
             const min = chart.scales.x.min ?? 0;
             const max = chart.scales.x.max ?? xMax;
             
@@ -416,17 +397,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             const newRange = { min: validMin, max: validMax };
             zoomStateRef.current = newRange;
             setViewRange(newRange);
-
-            // Update chart scales directly for immediate feedback
-            chart.scales.x.min = validMin;
-            chart.scales.x.max = validMax;
-            if (chart.options.scales?.x) {
-              chart.options.scales.x.min = validMin;
-              chart.options.scales.x.max = validMax;
-            }
-            
-            // Force chart update
-            chart.update('none');
           }
         },
         limits: {
@@ -443,7 +413,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         }
       } satisfies Partial<ZoomPluginOptions>,
       loopOverlay: { loopStart, loopEnd },
-      playbackIndicator: { playbackTime },
+      playbackIndicator: { playbackTime: 0 },
       marginIndicator: {
         showLeftMargin,
         showRightMargin
@@ -469,15 +439,22 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     elements: {
       line: { tension: 0.2 },
     },
-  }), [xMax, yRange, loopStart, loopEnd, playbackTime, viewRange, showLeftMargin, showRightMargin]);
+  })}, [xMax, yRange, loopStart, loopEnd, viewRange, showLeftMargin, showRightMargin]);
 
   // Update chart options when playback time changes
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart?.options?.plugins) return;
 
-    // Use the current view range
-    const { min: validMin, max: validMax } = viewRange;
+    console.log('Playback update:', {
+      playbackTime,
+      viewRange,
+      chartScales: {
+        min: chart.scales.x.min,
+        max: chart.scales.x.max
+      },
+      trigger: 'playback time change'
+    });
     
     // During drag, use visual values from the drag controller
     if (dragControllerRef.current?.isDragging()) {
@@ -487,28 +464,29 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         loopStart: visualValues.start,
         loopEnd: visualValues.end
       };
+
+      // Disable panning while dragging
+      if (chart.options.plugins.zoom?.pan) {
+        chart.options.plugins.zoom.pan.enabled = false;
+      }
     } else {
-      // Not dragging - update loop overlay
+      // Not dragging - update loop overlay and re-enable panning
       chart.options.plugins.loopOverlay = { loopStart, loopEnd };
+      if (chart.options.plugins.zoom?.pan) {
+        chart.options.plugins.zoom.pan.enabled = true;
+      }
     }
     
-    // Always update playback indicator
+    // Only update the playback indicator
     chart.options.plugins.playbackIndicator = { playbackTime };
     
-    // Preserve zoom state in both options and scales
-    if (chart.options.scales?.x) {
-      chart.options.scales.x.min = validMin;
-      chart.options.scales.x.max = validMax;
-    }
-    chart.scales.x.min = validMin;
-    chart.scales.x.max = validMax;
-
     // Use requestAnimationFrame for smooth updates
     requestAnimationFrame(() => {
       if (!chart?.ctx) return;
+      // Only redraw, don't update scales or other options
       chart.draw();
     });
-  }, [playbackTime, loopStart, loopEnd, viewRange]);
+  }, [playbackTime, loopStart, loopEnd]);
 
   // Handle reset zoom
   const handleResetZoom = () => {
@@ -694,13 +672,13 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       </div>
       <style>{`
         .pitch-graph-container {
-          touch-action: pinch-zoom pan-x pan-y;
+          touch-action: manipulation;
           position: relative;
           overflow: visible !important;
         }
         @media (max-width: 768px) {
           .pitch-graph-container {
-            touch-action: none;
+            touch-action: manipulation;
             height: 100px !important;
             min-height: 100px !important;
             max-height: 100px !important;
