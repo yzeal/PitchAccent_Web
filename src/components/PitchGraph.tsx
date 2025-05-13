@@ -93,6 +93,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   const isPanningRef = useRef(false);
   const lastMouseXRef = useRef<number | null>(null);
 
+  // Store playback time in a ref to avoid re-renders
+  const playbackTimeRef = useRef(0);
+
   // Initialize drag controller when chart is ready
   useEffect(() => {
     if (chartRef.current && onLoopChange) {
@@ -633,6 +636,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       trigger: 'playback time change'
     });
     
+    // Store playback time in ref
+    playbackTimeRef.current = playbackTime ?? 0;
+    
     // During drag, use visual values from the drag controller
     if (dragControllerRef.current?.isDragging()) {
       const visualValues = dragControllerRef.current.getVisualValues();
@@ -647,9 +653,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       chart.options.plugins.playbackIndicator.playbackTime = playbackTime;
     }
     
-    // Request redraw
+    // Request redraw without updating scales
     requestAnimationFrame(() => {
-      if (!chart?.ctx) return;
+      if (!chart?.ctx || !chart.scales.x || !chart.scales.y) return;
+      
+      // Force a redraw of just the playback indicator
       chart.draw();
     });
   }, [playbackTime]);

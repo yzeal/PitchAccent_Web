@@ -184,11 +184,6 @@ export class DragController {
       initialValue = selectedEdge === 'start' ? this.dragState.visualStart : this.dragState.visualEnd;
     }
 
-    // Disable panning in zoom plugin
-    if (this.chart?.options?.plugins?.zoom?.pan) {
-      this.chart.options.plugins.zoom.pan.enabled = false;
-    }
-
     this.dragState = {
       isDragging: true,
       edge: selectedEdge,
@@ -246,11 +241,6 @@ export class DragController {
       if (newStart !== this.loopStart || newEnd !== this.loopEnd) {
         this.onLoopChange(newStart, newEnd);
       }
-    }
-
-    // Re-enable panning in zoom plugin
-    if (this.chart?.options?.plugins?.zoom?.pan) {
-      this.chart.options.plugins.zoom.pan.enabled = true;
     }
 
     const { visualStart, visualEnd } = this.dragState;
