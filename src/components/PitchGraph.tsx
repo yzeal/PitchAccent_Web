@@ -96,6 +96,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Store playback time in a ref to avoid re-renders
   const playbackTimeRef = useRef(0);
 
+  // Add state for touch zoom
+  const touchStartRef = useRef<{ x1: number; y1: number; x2?: number; y2?: number; distance?: number } | null>(null);
+
   // Initialize drag controller when chart is ready
   useEffect(() => {
     if (chartRef.current && onLoopChange) {
@@ -272,23 +275,116 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     lastMouseXRef.current = null;
   };
 
-  // Set up event listeners
+  // Add touch zoom handler
+  const handleTouchStart = (e: TouchEvent) => {
+    if (e.touches.length !== 2 || dragControllerRef.current?.isDragging()) return;
+    
+    e.preventDefault();
+    const touch1 = e.touches[0];
+    const touch2 = e.touches[1];
+    
+    touchStartRef.current = {
+      x1: touch1.clientX,
+      y1: touch1.clientY,
+      x2: touch2.clientX,
+      y2: touch2.clientY,
+      distance: Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
+    };
+  };
+
+  const handleTouchMove = (e: TouchEvent) => {
+    const chart = chartRef.current;
+    if (!chart || e.touches.length !== 2 || !touchStartRef.current || dragControllerRef.current?.isDragging()) return;
+    
+    e.preventDefault();
+    const touch1 = e.touches[0];
+    const touch2 = e.touches[1];
+    
+    // Calculate new distance
+    const newDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+    const initialDistance = touchStartRef.current.distance!;
+    
+    // Calculate zoom factor based on the change in distance
+    const zoomFactor = newDistance / initialDistance;
+    
+    // Calculate center point of the pinch
+    const centerX = (touch1.clientX + touch2.clientX) / 2;
+    const rect = chart.canvas.getBoundingClientRect();
+    const mouseX = centerX - rect.left;
+    
+    // Calculate the data value at pinch center
+    const xScale = chart.scales.x;
+    const mouseDataX = xScale?.getValueForPixel?.(mouseX);
+    if (mouseDataX === undefined) return;
+    
+    const { min: currentMin, max: currentMax } = zoomStateRef.current;
+    const chartArea = chart.chartArea;
+    
+    // Calculate new range while keeping pinch center fixed
+    const currentRange = currentMax - currentMin;
+    const newRange = currentRange / zoomFactor;
+    const mouseRatio = (mouseX - chartArea.left) / (chartArea.right - chartArea.left);
+    const newMin = mouseDataX - (newRange * mouseRatio);
+    const newMax = newMin + newRange;
+    
+    // Apply limits
+    const finalMin = Math.max(0, newMin);
+    const finalMax = Math.min(xMax, Math.max(finalMin + 0.5, newMax));
+    
+    // Update zoom state
+    zoomStateRef.current = { min: finalMin, max: finalMax };
+    
+    // Update chart scales
+    if (chart.options.scales?.x) {
+      chart.options.scales.x.min = finalMin;
+      chart.options.scales.x.max = finalMax;
+    }
+    
+    // Update view range
+    setViewRange({ min: finalMin, max: finalMax });
+    
+    // Update chart
+    chart.update('none');
+    
+    // Update touch start reference for next move
+    touchStartRef.current = {
+      x1: touch1.clientX,
+      y1: touch1.clientY,
+      x2: touch2.clientX,
+      y2: touch2.clientY,
+      distance: newDistance
+    };
+  };
+
+  const handleTouchEnd = () => {
+    touchStartRef.current = null;
+  };
+
+  // Update event listeners to include touch zoom
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     canvas.addEventListener('wheel', handleWheel, { passive: false });
     canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
     window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('touchmove', handleTouchMove, { passive: false });
     window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('touchend', handleTouchEnd);
     window.addEventListener('mouseleave', handleMouseUp);
+    window.addEventListener('touchcancel', handleTouchEnd);
 
     return () => {
       canvas.removeEventListener('wheel', handleWheel);
       canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('touchstart', handleTouchStart);
       window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('touchmove', handleTouchMove);
       window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchend', handleTouchEnd);
       window.removeEventListener('mouseleave', handleMouseUp);
+      window.removeEventListener('touchcancel', handleTouchEnd);
     };
   }, [canvasRef.current, xMax]);
 
