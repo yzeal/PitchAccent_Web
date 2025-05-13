@@ -654,11 +654,18 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           height: 150,
           width: '100%',
           maxWidth: '100%',
-          paddingRight: '40px',
+          paddingRight: '80px',
         }}
         className="pitch-graph-container"
       >
-        <Line ref={chartRef} data={chartData} options={options} plugins={[loopOverlayPlugin, playbackIndicatorPlugin, marginIndicatorPlugin]} />
+        <Line ref={chartRef} data={chartData} options={{
+          ...options,
+          layout: {
+            padding: {
+              right: 40
+            }
+          }
+        }} plugins={[loopOverlayPlugin, playbackIndicatorPlugin, marginIndicatorPlugin]} />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button
@@ -692,7 +699,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             height: 100px !important;
             min-height: 100px !important;
             max-height: 100px !important;
-            padding-right: 50px !important;
+            padding-right: 80px !important;
           }
           .pitch-graph-container::-webkit-scrollbar {
             display: none;
