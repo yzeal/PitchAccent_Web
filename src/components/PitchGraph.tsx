@@ -99,6 +99,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Add state for touch zoom
   const touchStartRef = useRef<{ x1: number; y1: number; x2?: number; y2?: number; distance?: number } | null>(null);
 
+  // Add state for touch pan
+  const touchPanRef = useRef<{ x: number; y: number } | null>(null);
+
   // Initialize drag controller when chart is ready
   useEffect(() => {
     if (chartRef.current && onLoopChange) {
@@ -275,89 +278,154 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     lastMouseXRef.current = null;
   };
 
-  // Add touch zoom handler
+  // Modify touch handlers to support both pan and zoom
   const handleTouchStart = (e: TouchEvent) => {
-    if (e.touches.length !== 2 || dragControllerRef.current?.isDragging()) return;
+    if (dragControllerRef.current?.isDragging()) return;
     
-    e.preventDefault();
-    const touch1 = e.touches[0];
-    const touch2 = e.touches[1];
-    
-    touchStartRef.current = {
-      x1: touch1.clientX,
-      y1: touch1.clientY,
-      x2: touch2.clientX,
-      y2: touch2.clientY,
-      distance: Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
-    };
+    if (e.touches.length === 2) {
+      // Pinch-to-zoom start
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      
+      touchStartRef.current = {
+        x1: touch1.clientX,
+        y1: touch1.clientY,
+        x2: touch2.clientX,
+        y2: touch2.clientY,
+        distance: Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
+      };
+      touchPanRef.current = null; // Clear any existing pan state
+    } else if (e.touches.length === 1) {
+      // Single-touch pan start
+      const touch = e.touches[0];
+      touchPanRef.current = {
+        x: touch.clientX,
+        y: touch.clientY
+      };
+      touchStartRef.current = null; // Clear any existing zoom state
+    }
   };
 
   const handleTouchMove = (e: TouchEvent) => {
     const chart = chartRef.current;
-    if (!chart || e.touches.length !== 2 || !touchStartRef.current || dragControllerRef.current?.isDragging()) return;
-    
-    e.preventDefault();
-    const touch1 = e.touches[0];
-    const touch2 = e.touches[1];
-    
-    // Calculate new distance
-    const newDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
-    const initialDistance = touchStartRef.current.distance!;
-    
-    // Calculate zoom factor based on the change in distance
-    const zoomFactor = newDistance / initialDistance;
-    
-    // Calculate center point of the pinch
-    const centerX = (touch1.clientX + touch2.clientX) / 2;
-    const rect = chart.canvas.getBoundingClientRect();
-    const mouseX = centerX - rect.left;
-    
-    // Calculate the data value at pinch center
-    const xScale = chart.scales.x;
-    const mouseDataX = xScale?.getValueForPixel?.(mouseX);
-    if (mouseDataX === undefined) return;
-    
-    const { min: currentMin, max: currentMax } = zoomStateRef.current;
-    const chartArea = chart.chartArea;
-    
-    // Calculate new range while keeping pinch center fixed
-    const currentRange = currentMax - currentMin;
-    const newRange = currentRange / zoomFactor;
-    const mouseRatio = (mouseX - chartArea.left) / (chartArea.right - chartArea.left);
-    const newMin = mouseDataX - (newRange * mouseRatio);
-    const newMax = newMin + newRange;
-    
-    // Apply limits
-    const finalMin = Math.max(0, newMin);
-    const finalMax = Math.min(xMax, Math.max(finalMin + 0.5, newMax));
-    
-    // Update zoom state
-    zoomStateRef.current = { min: finalMin, max: finalMax };
-    
-    // Update chart scales
-    if (chart.options.scales?.x) {
-      chart.options.scales.x.min = finalMin;
-      chart.options.scales.x.max = finalMax;
+    if (!chart || dragControllerRef.current?.isDragging()) return;
+
+    if (e.touches.length === 2 && touchStartRef.current) {
+      // Pinch-to-zoom move
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      
+      // Calculate new distance
+      const newDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+      const initialDistance = touchStartRef.current.distance!;
+      
+      // Calculate zoom factor based on the change in distance
+      const zoomFactor = newDistance / initialDistance;
+      
+      // Calculate center point of the pinch
+      const centerX = (touch1.clientX + touch2.clientX) / 2;
+      const rect = chart.canvas.getBoundingClientRect();
+      const mouseX = centerX - rect.left;
+      
+      // Calculate the data value at pinch center
+      const xScale = chart.scales.x;
+      const mouseDataX = xScale?.getValueForPixel?.(mouseX);
+      if (mouseDataX === undefined) return;
+      
+      const { min: currentMin, max: currentMax } = zoomStateRef.current;
+      const chartArea = chart.chartArea;
+      
+      // Calculate new range while keeping pinch center fixed
+      const currentRange = currentMax - currentMin;
+      const newRange = currentRange / zoomFactor;
+      const mouseRatio = (mouseX - chartArea.left) / (chartArea.right - chartArea.left);
+      const newMin = mouseDataX - (newRange * mouseRatio);
+      const newMax = newMin + newRange;
+      
+      // Apply limits
+      const finalMin = Math.max(0, newMin);
+      const finalMax = Math.min(xMax, Math.max(finalMin + 0.5, newMax));
+      
+      // Update zoom state
+      zoomStateRef.current = { min: finalMin, max: finalMax };
+      
+      // Update chart scales
+      if (chart.options.scales?.x) {
+        chart.options.scales.x.min = finalMin;
+        chart.options.scales.x.max = finalMax;
+      }
+      
+      // Update view range
+      setViewRange({ min: finalMin, max: finalMax });
+      
+      // Update chart
+      chart.update('none');
+      
+      // Update touch start reference for next move
+      touchStartRef.current = {
+        x1: touch1.clientX,
+        y1: touch1.clientY,
+        x2: touch2.clientX,
+        y2: touch2.clientY,
+        distance: newDistance
+      };
+    } else if (e.touches.length === 1 && touchPanRef.current) {
+      // Single-touch pan move
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - touchPanRef.current.x;
+      
+      const xScale = chart.scales.x;
+      if (!xScale?.getValueForPixel) return;
+      
+      const deltaValue0 = xScale.getValueForPixel(0);
+      const deltaValueDelta = xScale.getValueForPixel(deltaX);
+      if (deltaValue0 === undefined || deltaValueDelta === undefined) return;
+      
+      const deltaData = deltaValueDelta - deltaValue0;
+      
+      const { min: currentMin, max: currentMax } = zoomStateRef.current;
+      let newMin = currentMin - deltaData;
+      let newMax = currentMax - deltaData;
+      
+      // Apply limits
+      if (newMin < 0) {
+        newMax += (0 - newMin);
+        newMin = 0;
+      }
+      if (newMax > xMax) {
+        newMin -= (newMax - xMax);
+        newMax = xMax;
+      }
+      if (newMin < 0) newMin = 0;
+      
+      // Update zoom state
+      zoomStateRef.current = { min: newMin, max: newMax };
+      
+      // Update chart scales
+      if (chart.options.scales?.x) {
+        chart.options.scales.x.min = newMin;
+        chart.options.scales.x.max = newMax;
+      }
+      
+      // Update view range
+      setViewRange({ min: newMin, max: newMax });
+      
+      // Update chart
+      chart.update('none');
+      
+      // Update touch reference for next move
+      touchPanRef.current = {
+        x: touch.clientX,
+        y: touch.clientY
+      };
     }
-    
-    // Update view range
-    setViewRange({ min: finalMin, max: finalMax });
-    
-    // Update chart
-    chart.update('none');
-    
-    // Update touch start reference for next move
-    touchStartRef.current = {
-      x1: touch1.clientX,
-      y1: touch1.clientY,
-      x2: touch2.clientX,
-      y2: touch2.clientY,
-      distance: newDistance
-    };
   };
 
   const handleTouchEnd = () => {
     touchStartRef.current = null;
+    touchPanRef.current = null;
   };
 
   // Update event listeners to include touch zoom
@@ -574,6 +642,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   };
 
+  // Add function to check if device is mobile
+  const isMobileDevice = () => {
+    return window.matchMedia('(max-width: 768px)').matches;
+  };
+
   // Memoize options without zoom plugin
   const options = useMemo(() => {
     console.log('Options recalculated:', { 
@@ -589,7 +662,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     plugins: {
       legend: { display: false },
       title: { display: false },
-      tooltip: { enabled: true },
+      tooltip: { 
+        enabled: !isMobileDevice(),  // Disable tooltips on mobile
+      },
       loopOverlay: { loopStart, loopEnd },
       playbackIndicator: { playbackTime: 0 },
       marginIndicator: {

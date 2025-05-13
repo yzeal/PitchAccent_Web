@@ -17,5 +17,10 @@
 - Option to choose smoothing/filtering method for pitch curves
 - Keyboard shortcuts customization
 - **Microphone selection dropdown for desktop browsers only** (use `enumerateDevices` and `getUserMedia` with `deviceId`; hide on mobile for cleaner UI and because it's not supported)
+- **Tooltip configuration options:**
+  - Enable/disable tooltips globally
+  - Separate toggle for mobile/desktop devices
+  - Customizable tooltip content and appearance
+  - Option to show tooltips only when graph is paused
 
 # Add more notes here as new features/ideas arise 
