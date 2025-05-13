@@ -536,6 +536,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     chart.update('none');
   };
 
+  // Auto-reset zoom when new pitch data is loaded
+  useEffect(() => {
+    handleResetZoom();
+  }, [times]);
+
   // Set up event listeners when canvas is ready
   useEffect(() => {
     const canvas = canvasRef.current;
