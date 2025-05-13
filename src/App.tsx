@@ -563,6 +563,14 @@ const App: React.FC = () => {
               loopEnd={loopEnd}
               yFit={loopYFit}
               playbackTime={nativePlaybackTime}
+              onLoopChange={(start, end) => {
+                setLoopStart(start);
+                setLoopEnd(end);
+                if (nativeVideoRef.current) {
+                  nativeVideoRef.current.currentTime = start;
+                }
+                fitYAxisToLoop();
+              }}
             />
           </section>
 

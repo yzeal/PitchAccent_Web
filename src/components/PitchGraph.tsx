@@ -30,6 +30,13 @@ declare module 'chart.js' {
   }
 }
 
+// Add new types for drag state
+interface DragState {
+  isDragging: boolean;
+  edge: 'start' | 'end' | null;
+  initialX: number | null;
+}
+
 export interface PitchGraphWithControlsProps {
   times: number[];
   pitches: (number | null)[];
@@ -40,6 +47,7 @@ export interface PitchGraphWithControlsProps {
   yFit?: [number, number] | null;
   playbackTime?: number;
   onChartReady?: (chart: Chart<'line', (number | null)[], number> | null) => void;
+  onLoopChange?: (start: number, end: number) => void;
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -60,8 +68,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     yFit,
     playbackTime = undefined,
     onChartReady,
+    onLoopChange,
   } = props;
-  const chartRef = useRef<any>(null);
+  const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
 
   useEffect(() => {
     if (onChartReady) {
@@ -75,11 +84,16 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Update chart options when loop values or playbackTime change
   useEffect(() => {
     const chart = chartRef.current;
-    if (chart?.options?.plugins) {
-      chart.options.plugins.loopOverlay = { loopStart, loopEnd };
-      chart.options.plugins.playbackIndicator = { playbackTime };
-      chart.update('none');
-    }
+    if (!chart?.options?.plugins) return;
+
+    chart.options.plugins.loopOverlay = { 
+      loopStart: loopStart ?? 0,
+      loopEnd: loopEnd ?? 0
+    };
+    chart.options.plugins.playbackIndicator = { 
+      playbackTime: playbackTime ?? 0
+    };
+    chart.update('none');
   }, [loopStart, loopEnd, playbackTime, yRange]);
 
   useEffect(() => {
@@ -282,6 +296,150 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       chartRef.current.resetZoom();
     }
   };
+
+  // Add state for drag handling
+  const [dragState, setDragState] = useState<DragState>({
+    isDragging: false,
+    edge: null,
+    initialX: null
+  });
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Function to get chart coordinates from mouse/touch event
+  const getChartCoordinates = (event: MouseEvent | TouchEvent): { x: number, y: number } | null => {
+    const canvas = canvasRef.current;
+    const chart = chartRef.current;
+    if (!canvas || !chart?.scales?.x || !chart.scales?.y) return null;
+
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
+    const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY;
+    
+    const x = chart.scales.x.getValueForPixel?.(clientX - rect.left) ?? 0;
+    const y = chart.scales.y.getValueForPixel?.(clientY - rect.top) ?? 0;
+    
+    return { x, y };
+  };
+
+  // Function to check if mouse is near an edge
+  const getNearestEdge = (x: number): 'start' | 'end' | null => {
+    if (loopStart === undefined || loopEnd === undefined) return null;
+    
+    const chart = chartRef.current;
+    if (!chart || !chart.scales?.x) return null;
+    
+    const pixelsPerUnit = chart.scales.x.width / (chart.scales.x.max - chart.scales.x.min);
+    const threshold = 20 / pixelsPerUnit; // 20 pixels tolerance
+    
+    if (Math.abs(x - loopStart) <= threshold) return 'start';
+    if (Math.abs(x - loopEnd) <= threshold) return 'end';
+    return null;
+  };
+
+  // Mouse/Touch event handlers
+  const handleMouseDown = (event: MouseEvent | TouchEvent) => {
+    const coords = getChartCoordinates(event);
+    if (!coords) return;
+
+    const edge = getNearestEdge(coords.x);
+    if (edge) {
+      setDragState({
+        isDragging: true,
+        edge,
+        initialX: coords.x
+      });
+      event.preventDefault();
+    }
+  };
+
+  const handleMouseMove = (event: MouseEvent | TouchEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const coords = getChartCoordinates(event);
+    if (!coords) return;
+
+    if (dragState.isDragging && dragState.edge && loopStart !== undefined && loopEnd !== undefined) {
+      event.preventDefault();
+      const chart = chartRef.current;
+      if (!chart?.scales?.x || !chart.options?.plugins) return;
+
+      const minX = chart.scales.x.min ?? 0;
+      const maxX = chart.scales.x.max ?? 5;
+      const newX = Math.max(minX, Math.min(maxX, coords.x));
+
+      if (dragState.edge === 'start' && newX < loopEnd) {
+        chart.options.plugins.loopOverlay = { 
+          ...(chart.options.plugins.loopOverlay ?? {}),
+          loopStart: newX 
+        };
+      } else if (dragState.edge === 'end' && newX > loopStart) {
+        chart.options.plugins.loopOverlay = { 
+          ...(chart.options.plugins.loopOverlay ?? {}),
+          loopEnd: newX 
+        };
+      }
+      chart.update('none');
+    } else {
+      // Update cursor based on proximity to edges
+      const edge = getNearestEdge(coords.x);
+      canvas.style.cursor = edge ? 'ew-resize' : 'default';
+    }
+  };
+
+  const handleMouseUp = () => {
+    if (dragState.isDragging) {
+      const chart = chartRef.current;
+      if (!chart?.options?.plugins?.loopOverlay) return;
+
+      const newStart = chart.options.plugins.loopOverlay.loopStart ?? loopStart;
+      const newEnd = chart.options.plugins.loopOverlay.loopEnd ?? loopEnd;
+
+      // Only call onLoopChange if both values are defined
+      if (newStart !== undefined && newEnd !== undefined) {
+        if (dragState.edge === 'start') {
+          onLoopChange?.(newStart, newEnd);
+        } else if (dragState.edge === 'end') {
+          onLoopChange?.(newStart, newEnd);
+        }
+      }
+    }
+    setDragState({ isDragging: false, edge: null, initialX: null });
+  };
+
+  // Add event listeners when the chart is ready
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const addEventListeners = () => {
+      canvas.addEventListener('mousedown', handleMouseDown);
+      canvas.addEventListener('touchstart', handleMouseDown);
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('touchmove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+      window.addEventListener('touchend', handleMouseUp);
+    };
+
+    const removeEventListeners = () => {
+      canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('touchstart', handleMouseDown);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('touchmove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('touchend', handleMouseUp);
+    };
+
+    addEventListeners();
+    return removeEventListeners;
+  }, [dragState, loopStart, loopEnd]);
+
+  // Store canvas reference when chart is mounted
+  useEffect(() => {
+    if (chartRef.current) {
+      canvasRef.current = chartRef.current.canvas;
+    }
+  }, [chartRef.current]);
 
   return (
     <div
