@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import type { Plugin, ChartTypeRegistry } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
+import type { ZoomPluginOptions } from 'chartjs-plugin-zoom/types/options';
 import { DragController } from './DragController';
 
 ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale, zoomPlugin);
@@ -23,7 +24,7 @@ interface LoopOverlayOptions {
   loopEnd?: number;
 }
 
-// Extend Chart.js types to include our plugin
+// Extend Chart.js types to include our plugins
 declare module 'chart.js' {
   interface PluginOptionsByType<TType extends keyof ChartTypeRegistry> {
     loopOverlay?: LoopOverlayOptions;
@@ -71,6 +72,24 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   
   // Create a ref for the drag controller
   const dragControllerRef = useRef<DragController | null>(null);
+
+  // Calculate xMax only when times changes
+  const xMax = useMemo(() => {
+    return times.length > 0 ? Math.max(2, times[times.length - 1]) : 5;
+  }, [times]);
+
+  // Add a ref to store the current zoom state
+  const zoomStateRef = useRef<{ min: number; max: number }>({ min: 0, max: xMax });
+
+  // Add a state to track the view range
+  const [viewRange, setViewRange] = useState<{ min: number; max: number }>({ min: 0, max: xMax });
+
+  // Update zoom state ref when xMax changes
+  useEffect(() => {
+    if (zoomStateRef.current.max === 0) {
+      zoomStateRef.current = { min: 0, max: xMax };
+    }
+  }, [xMax]);
 
   // Initialize drag controller when chart is ready
   useEffect(() => {
@@ -132,10 +151,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [pitches, yFit]);
 
-  // Calculate xMax only when times changes
-  const xMax = useMemo(() => {
-    return times.length > 0 ? Math.max(2, times[times.length - 1]) : 5;
-  }, [times]);
+  // Update view range when zoom state changes
+  useEffect(() => {
+    setViewRange(zoomStateRef.current);
+  }, [zoomStateRef.current.min, zoomStateRef.current.max]);
 
   const chartData = {
     labels: times,
@@ -238,7 +257,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     },
   };
 
-  // Memoize options
+  // Memoize options with zoom preservation
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -248,19 +267,66 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       title: { display: false },
       tooltip: { enabled: true },
       zoom: {
+        zoom: {
+          wheel: {
+            enabled: true,
+            speed: 0.1,
+            modifierKey: undefined
+          },
+          drag: {
+            enabled: false
+          },
+          pinch: {
+            enabled: true
+          },
+          mode: 'x',
+          onZoomComplete: function(this: Chart, { chart }: { chart: Chart }) {
+            const min = chart.scales.x.min ?? 0;
+            const max = chart.scales.x.max ?? xMax;
+            
+            // Calculate valid zoom range while preserving the view width
+            const currentRange = max - min;
+            const validMax = Math.min(min + currentRange, xMax);
+            const validMin = Math.max(0, min);
+            
+            // Update zoom state ref and view range
+            const newRange = { min: validMin, max: validMax };
+            zoomStateRef.current = newRange;
+            setViewRange(newRange);
+          }
+        },
         pan: {
           enabled: true,
-          mode: 'x' as const,
-        },
-        zoom: {
-          wheel: { enabled: true },
-          pinch: { enabled: true, speed: 0.01 },
-          mode: 'x' as const,
+          mode: 'x',
+          modifierKey: 'ctrl',
+          onPanComplete: function(this: Chart, { chart }: { chart: Chart }) {
+            const min = chart.scales.x.min ?? 0;
+            const max = chart.scales.x.max ?? xMax;
+            
+            // Calculate valid pan range while preserving the view width
+            const currentRange = max - min;
+            const validMax = Math.min(min + currentRange, xMax);
+            const validMin = Math.max(0, min);
+            
+            // Update zoom state ref and view range
+            const newRange = { min: validMin, max: validMax };
+            zoomStateRef.current = newRange;
+            setViewRange(newRange);
+          }
         },
         limits: {
-          x: { min: 0, max: xMax },
-        },
-      },
+          x: { 
+            min: 0, 
+            max: xMax, 
+            minRange: 0.5 
+          },
+          y: { 
+            min: yRange[0], 
+            max: yRange[1], 
+            minRange: 50 
+          }
+        }
+      } satisfies Partial<ZoomPluginOptions>,
       loopOverlay: { loopStart, loopEnd },
       playbackIndicator: { playbackTime },
     },
@@ -269,8 +335,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         type: 'linear' as const,
         title: { display: false },
         ticks: { maxTicksLimit: 8, font: { size: 10 } },
-        min: 0,
-        max: xMax,
+        min: viewRange.min,
+        max: viewRange.max,
+        grace: '5%',
+        bounds: 'data' as const
       },
       y: {
         title: { display: false },
@@ -282,12 +350,71 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     elements: {
       line: { tension: 0.2 },
     },
-  }), [xMax, yRange, loopStart, loopEnd, playbackTime]);
+  }), [xMax, yRange, loopStart, loopEnd, playbackTime, viewRange]);
 
-  const handleResetZoom = () => {
-    if (chartRef.current) {
-      chartRef.current.resetZoom();
+  // Update chart options when playback time changes
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart?.options?.plugins) return;
+
+    // Use the current view range
+    const { min: validMin, max: validMax } = viewRange;
+    
+    // During drag, use visual values from the drag controller
+    if (dragControllerRef.current?.isDragging()) {
+      const visualValues = dragControllerRef.current.getVisualValues();
+      
+      chart.options.plugins.loopOverlay = {
+        loopStart: visualValues.start,
+        loopEnd: visualValues.end
+      };
+    } else {
+      // Not dragging - update loop overlay
+      chart.options.plugins.loopOverlay = { loopStart, loopEnd };
     }
+    
+    // Always update playback indicator
+    chart.options.plugins.playbackIndicator = { playbackTime };
+    
+    // Preserve zoom state in both options and scales
+    if (chart.options.scales?.x) {
+      chart.options.scales.x.min = validMin;
+      chart.options.scales.x.max = validMax;
+    }
+    chart.scales.x.min = validMin;
+    chart.scales.x.max = validMax;
+
+    // Use requestAnimationFrame for smooth updates
+    requestAnimationFrame(() => {
+      if (!chart?.ctx) return;
+      chart.draw();
+    });
+  }, [playbackTime, loopStart, loopEnd, viewRange]);
+
+  // Handle reset zoom
+  const handleResetZoom = () => {
+    if (!chartRef.current) return;
+    
+    const chart = chartRef.current;
+    const newMax = Math.max(2, times[times.length - 1]);
+    
+    // Update zoom state ref and view range
+    const newRange = { min: 0, max: newMax };
+    zoomStateRef.current = newRange;
+    setViewRange(newRange);
+    
+    // Update chart scales and options
+    if (chart.options.scales?.x) {
+      chart.options.scales.x.min = 0;
+      chart.options.scales.x.max = newMax;
+    }
+    
+    // Update actual scales
+    chart.scales.x.min = 0;
+    chart.scales.x.max = newMax;
+    
+    // Force chart to update its layout
+    chart.update('none');
   };
 
   // Set up event listeners when canvas is ready
@@ -328,37 +455,46 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   useEffect(() => {
     if (chartRef.current) {
       canvasRef.current = chartRef.current.canvas;
+      
+      // Set initial zoom state
+      if (zoomStateRef.current.max === 0 || zoomStateRef.current.max < xMax) {
+        // Calculate initial view range
+        const currentRange = zoomStateRef.current.max - zoomStateRef.current.min;
+        const validRange = currentRange > 0 ? currentRange : xMax;
+        const validMax = Math.min(xMax, validRange);
+        const validMin = Math.max(0, validMax - validRange);
+        
+        // Update zoom state
+        zoomStateRef.current = { min: validMin, max: validMax };
+        
+        // Update chart scales directly
+        if (chartRef.current.options.scales?.x) {
+          chartRef.current.options.scales.x.min = validMin;
+          chartRef.current.options.scales.x.max = validMax;
+        }
+        chartRef.current.scales.x.min = validMin;
+        chartRef.current.scales.x.max = validMax;
+      }
     }
-  }, [chartRef.current]);
+  }, [chartRef.current, xMax]);
 
-  // Update chart options when playback time changes
+  // Remove the separate zoom state change listener since we're handling it in the options
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart?.options?.plugins) return;
+    if (!chart?.options?.plugins?.zoom) return;
 
-    // During drag, use visual values from the drag controller
-    if (dragControllerRef.current?.isDragging()) {
-      const visualValues = dragControllerRef.current.getVisualValues();
-      chart.options.plugins.loopOverlay = {
-        loopStart: visualValues.start,
-        loopEnd: visualValues.end
-      };
-      chart.options.plugins.playbackIndicator = { playbackTime };
-      requestAnimationFrame(() => {
-        if (!chart?.ctx) return;
-        chart.draw();
-      });
-      return;
-    }
-
-    // Not dragging - update both loop overlay and playback indicator
-    chart.options.plugins.loopOverlay = { loopStart, loopEnd };
-    chart.options.plugins.playbackIndicator = { playbackTime };
-    
-    requestAnimationFrame(() => {
-      chart.update('none');
-    });
-  }, [playbackTime, loopStart, loopEnd]);
+    return () => {
+      if (chart.options?.plugins?.zoom) {
+        const zoomOptions = chart.options.plugins.zoom;
+        if (zoomOptions.zoom) {
+          zoomOptions.zoom.onZoomComplete = undefined;
+        }
+        if (zoomOptions.pan) {
+          zoomOptions.pan.onPanComplete = undefined;
+        }
+      }
+    };
+  }, [chartRef.current]);
 
   return (
     <div
