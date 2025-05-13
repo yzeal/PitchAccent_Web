@@ -309,7 +309,37 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         pan: {
           enabled: true,
           mode: 'x',
-          modifierKey: 'ctrl',
+          modifierKey: undefined,
+          onPanStart: function(this: Chart, { chart }: { chart: Chart }) {
+            // Get the current mouse position
+            const event = chart.ctx.canvas.getAttribute('data-last-event');
+            if (!event) return true; // Allow pan if no event data
+            
+            const mouseEvent = JSON.parse(event) as { x: number; y: number };
+            const xValue = chart.scales.x.getValueForPixel(mouseEvent.x);
+            if (xValue === undefined) return true; // Allow pan if we can't determine position
+            
+            // Get loop region values
+            const loopStart = chart.options.plugins?.loopOverlay?.loopStart ?? 0;
+            const loopEnd = chart.options.plugins?.loopOverlay?.loopEnd ?? xMax;
+            
+            // Check if we're near the edges (use the same threshold as drag controller)
+            const pixelsPerUnit = chart.scales.x.width / (chart.scales.x.max - chart.scales.x.min);
+            const threshold = 20 / pixelsPerUnit; // 20 pixels threshold
+            
+            const nearStart = Math.abs(xValue - loopStart) <= threshold;
+            const nearEnd = Math.abs(xValue - loopEnd) <= threshold;
+            
+            // If near edges, only allow pan with Ctrl key
+            if (nearStart || nearEnd) {
+              const event = chart.ctx.canvas.getAttribute('data-last-event');
+              if (!event) return false;
+              const mouseEvent = JSON.parse(event) as { ctrlKey: boolean };
+              return mouseEvent.ctrlKey;
+            }
+            
+            return true; // Allow pan if not near edges
+          },
           onPanComplete: function(this: Chart, { chart }: { chart: Chart }) {
             const min = chart.scales.x.min ?? 0;
             const max = chart.scales.x.max ?? xMax;
@@ -444,12 +474,26 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const canvas = canvasRef.current;
     const dragController = dragControllerRef.current;
     if (!canvas || !dragController) return;
-
-    console.log('[Event Setup] Adding event listeners to canvas:', canvas);
+    
+    // Store mouse event data for pan handler
+    const handleMouseMove = (e: MouseEvent | TouchEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const event = 'touches' in e ? e.touches[0] : e;
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      canvas.setAttribute('data-last-event', JSON.stringify({ 
+        x, 
+        y, 
+        ctrlKey: 'ctrlKey' in e ? e.ctrlKey : false 
+      }));
+      dragController.handleMouseMove(e);
+    };
     
     const handleMouseDown = (e: MouseEvent | TouchEvent) => dragController.handleMouseDown(e);
-    const handleMouseMove = (e: MouseEvent | TouchEvent) => dragController.handleMouseMove(e);
-    const handleMouseUp = (e: MouseEvent | TouchEvent) => dragController.handleMouseUp(e);
+    const handleMouseUp = (e: MouseEvent | TouchEvent) => {
+      canvas.removeAttribute('data-last-event');
+      dragController.handleMouseUp(e);
+    };
     
     canvas.addEventListener('mousedown', handleMouseDown, { capture: true });
     canvas.addEventListener('touchstart', handleMouseDown, { capture: true, passive: false });
@@ -461,7 +505,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     window.addEventListener('touchcancel', handleMouseUp, { capture: true });
 
     return () => {
-      console.log('[Event Setup] Removing event listeners');
+      canvas.removeAttribute('data-last-event');
       canvas.removeEventListener('mousedown', handleMouseDown, { capture: true });
       canvas.removeEventListener('touchstart', handleMouseDown, { capture: true });
       window.removeEventListener('mousemove', handleMouseMove, { capture: true });
