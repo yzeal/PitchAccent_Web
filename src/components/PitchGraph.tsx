@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
@@ -39,6 +39,7 @@ export interface PitchGraphWithControlsProps {
   loopEnd?: number;
   yFit?: [number, number] | null;
   playbackTime?: number;
+  onChartReady?: (chart: Chart<'line', (number | null)[], number> | null) => void;
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -46,17 +47,29 @@ const MAX_VISIBLE_RANGE = 600;
 const Y_MIN_LIMIT = 0;
 const Y_MAX_LIMIT = 600;
 
-const PitchGraphWithControls: React.FC<PitchGraphWithControlsProps> = ({
-  times,
-  pitches,
-  label = 'Pitch (Hz)',
-  color = '#1976d2',
-  loopStart,
-  loopEnd,
-  yFit,
-  playbackTime = undefined,
-}) => {
-  const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
+export type PitchGraphChartRef = Chart<'line', (number | null)[], number> | null;
+
+const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
+  const {
+    times,
+    pitches,
+    label = 'Pitch (Hz)',
+    color = '#1976d2',
+    loopStart,
+    loopEnd,
+    yFit,
+    playbackTime = undefined,
+    onChartReady,
+  } = props;
+  const chartRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (onChartReady) {
+      console.log('Chart ref:', chartRef.current);
+      onChartReady(chartRef.current || null);
+    }
+  }, [onChartReady, chartRef.current]);
+
   const [yRange, setYRange] = useState<[number, number]>([Y_MIN_LIMIT, Y_MAX_LIMIT]);
 
   // Update chart options when loop values or playbackTime change

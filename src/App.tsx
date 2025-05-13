@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react'
 import Footer from './components/Footer'
 import Recorder from './components/Recorder'
 import PitchGraphWithControls from './components/PitchGraph'
+import type { Chart } from 'chart.js';
 import './App.css'
 import { PitchDetector } from 'pitchy'
 
@@ -64,6 +65,8 @@ const App: React.FC = () => {
   const [userPlaybackTime, setUserPlaybackTime] = useState(0);
   const userAudioRef = useRef<HTMLAudioElement>(null);
   const userAudioPlayingRef = useRef(false);
+
+  const [nativeChartInstance, setNativeChartInstance] = useState<Chart<'line', (number | null)[], number> | null>(null);
 
   // Extract pitch from user recording when audioBlob changes
   React.useEffect(() => {
@@ -364,6 +367,12 @@ const App: React.FC = () => {
     };
   }, [audioBlob]);
 
+  React.useEffect(() => {
+    if (nativeChartInstance) {
+      console.log('Chart ref is now set:', nativeChartInstance);
+    }
+  }, [nativeChartInstance]);
+
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
@@ -521,10 +530,31 @@ const App: React.FC = () => {
                     onChange={e => setLoopDelay(Number(e.target.value))}
                     style={{ width: 60 }}
                   />
+                  <button
+                    style={{ fontSize: 12, padding: '2px 8px', marginLeft: 8 }}
+                    title="Set loop to visible region"
+                    disabled={!nativeChartInstance}
+                    onClick={() => {
+                      const chart = nativeChartInstance;
+                      console.log('Loop visible button clicked. Chart ref:', chart);
+                      if (chart && chart.scales && chart.scales.x) {
+                        const xMin = chart.scales.x.min;
+                        const xMax = chart.scales.x.max;
+                        console.log('Setting loop to visible region:', xMin, xMax);
+                        setLoopStart(xMin);
+                        setLoopEnd(xMax);
+                      } else {
+                        console.log('Chart or x scale not available');
+                      }
+                    }}
+                  >
+                    Loop visible
+                  </button>
                 </div>
               </div>
             )}
             <PitchGraphWithControls
+              onChartReady={setNativeChartInstance}
               times={nativePitchData.times}
               pitches={nativePitchData.pitches}
               label="Native Pitch (Hz)"
