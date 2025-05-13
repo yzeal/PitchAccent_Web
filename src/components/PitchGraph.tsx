@@ -336,8 +336,13 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const chart = chartRef.current;
     if (!chart?.options?.plugins) return;
 
-    // During drag, only update playback indicator
+    // During drag, use visual values from the drag controller
     if (dragControllerRef.current?.isDragging()) {
+      const visualValues = dragControllerRef.current.getVisualValues();
+      chart.options.plugins.loopOverlay = {
+        loopStart: visualValues.start,
+        loopEnd: visualValues.end
+      };
       chart.options.plugins.playbackIndicator = { playbackTime };
       requestAnimationFrame(() => {
         if (!chart?.ctx) return;
@@ -353,7 +358,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     requestAnimationFrame(() => {
       chart.update('none');
     });
-  }, [playbackTime]);
+  }, [playbackTime, loopStart, loopEnd]);
 
   return (
     <div

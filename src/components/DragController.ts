@@ -7,6 +7,8 @@ interface DragState {
   edge: Edge;
   initialX: number | null;
   currentValue: number | null;
+  visualStart: number;
+  visualEnd: number;
 }
 
 export class DragController {
@@ -14,7 +16,9 @@ export class DragController {
     isDragging: false,
     edge: null,
     initialX: null,
-    currentValue: null
+    currentValue: null,
+    visualStart: 0,
+    visualEnd: 0
   };
 
   private chart: Chart | null = null;
@@ -37,6 +41,8 @@ export class DragController {
     if (options.edgeThresholdPixels !== undefined) {
       this.edgeThresholdPixels = options.edgeThresholdPixels;
     }
+    this.dragState.visualStart = this.loopStart;
+    this.dragState.visualEnd = this.loopEnd;
   }
 
   public updateValues(values: {
@@ -47,8 +53,14 @@ export class DragController {
   }) {
     if (values.chart !== undefined) this.chart = values.chart;
     if (values.onLoopChange !== undefined) this.onLoopChange = values.onLoopChange;
-    if (values.loopStart !== undefined) this.loopStart = values.loopStart;
-    if (values.loopEnd !== undefined) this.loopEnd = values.loopEnd;
+    if (values.loopStart !== undefined && !this.dragState.isDragging) {
+      this.loopStart = values.loopStart;
+      this.dragState.visualStart = values.loopStart;
+    }
+    if (values.loopEnd !== undefined && !this.dragState.isDragging) {
+      this.loopEnd = values.loopEnd;
+      this.dragState.visualEnd = values.loopEnd;
+    }
   }
 
   public isDragging(): boolean {
@@ -61,6 +73,13 @@ export class DragController {
 
   public getCurrentValue(): number | null {
     return this.dragState.currentValue;
+  }
+
+  public getVisualValues(): { start: number; end: number } {
+    return {
+      start: this.dragState.visualStart,
+      end: this.dragState.visualEnd
+    };
   }
 
   private getChartCoordinates(event: MouseEvent | TouchEvent): { x: number; y: number } | null {
@@ -88,8 +107,8 @@ export class DragController {
     const pixelsPerUnit = this.chart.scales.x.width / (this.chart.scales.x.max - this.chart.scales.x.min);
     const threshold = this.edgeThresholdPixels / pixelsPerUnit;
 
-    const distanceToStart = Math.abs(x - this.loopStart);
-    const distanceToEnd = Math.abs(x - this.loopEnd);
+    const distanceToStart = Math.abs(x - this.dragState.visualStart);
+    const distanceToEnd = Math.abs(x - this.dragState.visualEnd);
 
     if (distanceToStart <= threshold && distanceToStart <= distanceToEnd) return 'start';
     if (distanceToEnd <= threshold) return 'end';
@@ -110,7 +129,9 @@ export class DragController {
       isDragging: true,
       edge,
       initialX: coords.x,
-      currentValue: edge === 'start' ? this.loopStart : this.loopEnd
+      currentValue: edge === 'start' ? this.dragState.visualStart : this.dragState.visualEnd,
+      visualStart: this.dragState.visualStart,
+      visualEnd: this.dragState.visualEnd
     };
 
     return true;
@@ -129,21 +150,19 @@ export class DragController {
     const maxX = this.chart.scales.x.max ?? 5;
     const newX = Math.max(minX, Math.min(maxX, coords.x));
 
-    // Update the current value
+    // Update the current value and visual state
     this.dragState.currentValue = newX;
+    if (this.dragState.edge === 'start' && newX < this.dragState.visualEnd) {
+      this.dragState.visualStart = newX;
+    } else if (this.dragState.edge === 'end' && newX > this.dragState.visualStart) {
+      this.dragState.visualEnd = newX;
+    }
 
     // Update the chart's overlay immediately for visual feedback
-    if (this.dragState.edge === 'start' && newX < this.loopEnd) {
-      this.chart.options.plugins.loopOverlay = {
-        loopStart: newX,
-        loopEnd: this.loopEnd
-      };
-    } else if (this.dragState.edge === 'end' && newX > this.loopStart) {
-      this.chart.options.plugins.loopOverlay = {
-        loopStart: this.loopStart,
-        loopEnd: newX
-      };
-    }
+    this.chart.options.plugins.loopOverlay = {
+      loopStart: this.dragState.visualStart,
+      loopEnd: this.dragState.visualEnd
+    };
 
     // Request a redraw
     requestAnimationFrame(() => {
@@ -159,8 +178,8 @@ export class DragController {
     event.stopPropagation();
 
     if (this.dragState.currentValue !== null && this.onLoopChange) {
-      const newStart = this.dragState.edge === 'start' ? this.dragState.currentValue : this.loopStart;
-      const newEnd = this.dragState.edge === 'end' ? this.dragState.currentValue : this.loopEnd;
+      const newStart = this.dragState.edge === 'start' ? this.dragState.visualStart : this.loopStart;
+      const newEnd = this.dragState.edge === 'end' ? this.dragState.visualEnd : this.loopEnd;
 
       // Only call onLoopChange if values actually changed
       if (newStart !== this.loopStart || newEnd !== this.loopEnd) {
@@ -168,12 +187,15 @@ export class DragController {
       }
     }
 
-    // Reset drag state
+    // Reset drag state while preserving visual values
+    const { visualStart, visualEnd } = this.dragState;
     this.dragState = {
       isDragging: false,
       edge: null,
       initialX: null,
-      currentValue: null
+      currentValue: null,
+      visualStart,
+      visualEnd
     };
   };
 } 
