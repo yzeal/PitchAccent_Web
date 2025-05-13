@@ -52,13 +52,13 @@ const App: React.FC = () => {
   const [nativeMediaType, setNativeMediaType] = useState<'audio' | 'video' | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const nativeVideoRef = useRef<HTMLVideoElement>(null)
+  const nativeAudioRef = useRef<HTMLAudioElement>(null)
 
   // Loop selection and delay state
   const [loopStart, setLoopStart] = useState(0)
   const [loopEnd, setLoopEnd] = useState(0)
   const [loopDelay, setLoopDelay] = useState(0)
   const [loopYFit, setLoopYFit] = useState<[number, number] | null>(null)
-  const draggingRef = useRef(false)
 
   // Native playback time tracking
   const [nativePlaybackTime, setNativePlaybackTime] = useState(0);
@@ -204,7 +204,7 @@ const App: React.FC = () => {
 
   // --- Native playback time tracking ---
   React.useEffect(() => {
-    const media = nativeVideoRef.current;
+    const media = getActiveMediaElement();
     if (!media) return;
     let raf: number | null = null;
     const update = () => {
@@ -231,7 +231,7 @@ const App: React.FC = () => {
 
   // --- Native media loop segment logic ---
   React.useEffect(() => {
-    const media = nativeVideoRef.current;
+    const media = getActiveMediaElement();
     if (!media) return;
     let timeout: NodeJS.Timeout | null = null;
     if (
@@ -373,6 +373,13 @@ const App: React.FC = () => {
     }
   }, [nativeChartInstance]);
 
+  // Get the active media element (either video or audio)
+  const getActiveMediaElement = () => {
+    if (nativeMediaType === 'video') return nativeVideoRef.current;
+    if (nativeMediaType === 'audio') return nativeAudioRef.current;
+    return null;
+  };
+
   return (
     <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <div className="container">
@@ -412,7 +419,7 @@ const App: React.FC = () => {
                   marginBottom: '0.75rem',
                   maxWidth: '100%'
                 }}
-                ref={nativeVideoRef as any}
+                ref={nativeAudioRef}
               />
             )}
             {nativeMediaUrl && nativeMediaType === 'video' && (
@@ -435,71 +442,16 @@ const App: React.FC = () => {
               <div style={{ margin: '0.5rem 0 0.5rem 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                 <div style={{ width: '100%', maxWidth: 400, display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ fontSize: 12 }}>Loop region:</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={nativePitchData.times[nativePitchData.times.length - 1]}
-                    step={0.01}
-                    value={loopStart}
-                    onChange={e => {
-                      const newStart = Number(e.target.value);
-                      setLoopStart(newStart);
-                      if (newStart > loopEnd) setLoopEnd(newStart);
-                    }}
-                    onMouseDown={() => { draggingRef.current = true; }}
-                    onTouchStart={() => { draggingRef.current = true; }}
-                    onMouseUp={() => {
-                      draggingRef.current = false;
-                      fitYAxisToLoop();
-                      if (nativeVideoRef.current) {
-                        nativeVideoRef.current.currentTime = loopStart;
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      draggingRef.current = false;
-                      fitYAxisToLoop();
-                      if (nativeVideoRef.current) {
-                        nativeVideoRef.current.currentTime = loopStart;
-                      }
-                    }}
-                    style={{ flex: 1 }}
-                  />
-                  <span style={{ fontSize: 12 }}>{loopStart.toFixed(2)}s</span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={nativePitchData.times[nativePitchData.times.length - 1]}
-                    step={0.01}
-                    value={loopEnd}
-                    onChange={e => {
-                      const newEnd = Number(e.target.value);
-                      setLoopEnd(newEnd);
-                      if (newEnd < loopStart) setLoopStart(newEnd);
-                    }}
-                    onMouseDown={() => { draggingRef.current = true; }}
-                    onTouchStart={() => { draggingRef.current = true; }}
-                    onMouseUp={() => {
-                      draggingRef.current = false;
-                      fitYAxisToLoop();
-                      if (nativeVideoRef.current) {
-                        nativeVideoRef.current.currentTime = loopStart;
-                      }
-                    }}
-                    onTouchEnd={() => {
-                      draggingRef.current = false;
-                      fitYAxisToLoop();
-                      if (nativeVideoRef.current) {
-                        nativeVideoRef.current.currentTime = loopStart;
-                      }
-                    }}
-                    style={{ flex: 1 }}
-                  />
-                  <span style={{ fontSize: 12 }}>{loopEnd.toFixed(2)}s</span>
+                  <span style={{ fontSize: 12, flex: 1 }}>{loopStart.toFixed(2)}s - {loopEnd.toFixed(2)}s</span>
                   <button
                     onClick={() => {
                       const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
                       setLoopStart(0);
                       setLoopEnd(duration);
+                      const media = getActiveMediaElement();
+                      if (media) {
+                        media.currentTime = 0;
+                      }
                     }}
                     title="Reset Loop Region"
                     style={{
@@ -543,6 +495,10 @@ const App: React.FC = () => {
                         console.log('Setting loop to visible region:', xMin, xMax);
                         setLoopStart(xMin);
                         setLoopEnd(xMax);
+                        const media = getActiveMediaElement();
+                        if (media) {
+                          media.currentTime = xMin;
+                        }
                       } else {
                         console.log('Chart or x scale not available');
                       }
@@ -566,8 +522,8 @@ const App: React.FC = () => {
               onLoopChange={(start, end) => {
                 setLoopStart(start);
                 setLoopEnd(end);
-                if (nativeVideoRef.current) {
-                  nativeVideoRef.current.currentTime = start;
+                if (getActiveMediaElement()) {
+                  getActiveMediaElement()!.currentTime = start;
                 }
                 fitYAxisToLoop();
               }}

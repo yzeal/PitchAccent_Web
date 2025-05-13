@@ -654,6 +654,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           height: 150,
           width: '100%',
           maxWidth: '100%',
+          paddingRight: '40px',
         }}
         className="pitch-graph-container"
       >
@@ -682,6 +683,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       <style>{`
         .pitch-graph-container {
           touch-action: pinch-zoom pan-x pan-y;
+          position: relative;
+          overflow: visible !important;
         }
         @media (max-width: 768px) {
           .pitch-graph-container {
@@ -689,6 +692,14 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             height: 100px !important;
             min-height: 100px !important;
             max-height: 100px !important;
+            padding-right: 50px !important;
+          }
+          .pitch-graph-container::-webkit-scrollbar {
+            display: none;
+          }
+          .pitch-graph-container {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
           }
         }
       `}</style>
