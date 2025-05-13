@@ -13,6 +13,7 @@ import {
 } from 'chart.js';
 import type { Plugin, ChartTypeRegistry } from 'chart.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
+import { DragController } from './DragController';
 
 ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale, zoomPlugin);
 
@@ -68,76 +69,38 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [yRange, setYRange] = useState<[number, number]>([Y_MIN_LIMIT, Y_MAX_LIMIT]);
   
-  // Use ref for drag state to avoid re-renders
-  const dragStateRef = useRef<{
-    isDragging: boolean;
-    edge: 'start' | 'end' | null;
-    initialX: number | null;
-    currentValue: number | null;
-  }>({
-    isDragging: false,
-    edge: null,
-    initialX: null,
-    currentValue: null
-  });
+  // Create a ref for the drag controller
+  const dragControllerRef = useRef<DragController | null>(null);
+
+  // Initialize drag controller when chart is ready
+  useEffect(() => {
+    if (chartRef.current && onLoopChange) {
+      dragControllerRef.current = new DragController({
+        chart: chartRef.current,
+        onLoopChange,
+        loopStart: loopStart ?? 0,
+        loopEnd: loopEnd ?? 0
+      });
+    }
+  }, [chartRef.current]);
+
+  // Update drag controller values when props change
+  useEffect(() => {
+    if (dragControllerRef.current) {
+      dragControllerRef.current.updateValues({
+        chart: chartRef.current,
+        onLoopChange,
+        loopStart: loopStart ?? 0,
+        loopEnd: loopEnd ?? 0
+      });
+    }
+  }, [chartRef.current, onLoopChange, loopStart, loopEnd]);
 
   useEffect(() => {
     if (onChartReady) {
-      console.log('Chart ref:', chartRef.current);
       onChartReady(chartRef.current || null);
     }
   }, [onChartReady, chartRef.current]);
-
-  // Update chart options when loop values or playbackTime change
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart?.options?.plugins) return;
-
-    const plugins = chart.options.plugins;
-
-    console.log('[Chart Update Effect]', {
-      isDragging: dragStateRef.current.isDragging,
-      playbackTime,
-      loopStart,
-      loopEnd,
-      currentOverlay: plugins.loopOverlay
-    });
-
-    // Only update loop overlay if we're not dragging
-    if (!dragStateRef.current.isDragging) {
-      console.log('[Chart Update] Updating loop overlay (not dragging)');
-      plugins.loopOverlay = { 
-        loopStart: loopStart ?? 0,
-        loopEnd: loopEnd ?? 0
-      };
-    }
-    
-    // Update playback indicator without triggering a full chart update
-    plugins.playbackIndicator = { 
-      playbackTime: playbackTime ?? 0
-    };
-    
-    // Only do a full update if we're not dragging
-    if (!dragStateRef.current.isDragging) {
-      console.log('[Chart Update] Full chart update');
-      chart.update('none');
-    } else {
-      // Just redraw if we're dragging, and only update the playback indicator
-      console.log('[Chart Update] Redraw only (dragging)');
-      requestAnimationFrame(() => {
-        if (!chart?.ctx) return;
-        const ctx = chart.ctx;
-        
-        // Clear the canvas
-        ctx.save();
-        ctx.clearRect(0, 0, chart.width, chart.height);
-        ctx.restore();
-        
-        // Redraw the chart
-        chart.draw();
-      });
-    }
-  }, [loopStart, loopEnd, playbackTime, yRange]);
 
   useEffect(() => {
     if (yFit && yFit.length === 2) {
@@ -232,7 +195,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       
       // Draw loop region borders with thicker lines during drag
       ctx.strokeStyle = 'rgba(0, 0, 255, 0.5)';
-      ctx.lineWidth = dragStateRef.current.isDragging ? 2 : 1;
+      ctx.lineWidth = dragControllerRef.current?.isDragging() ? 2 : 1;
       
       // Left border
       ctx.beginPath();
@@ -275,7 +238,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     },
   };
 
-  // Memoize options, do NOT include yRange
+  // Memoize options
   const options = useMemo(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -298,7 +261,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           x: { min: 0, max: xMax },
         },
       },
-      // loopOverlay and playbackIndicator will be set via useEffect
+      loopOverlay: { loopStart, loopEnd },
+      playbackIndicator: { playbackTime },
     },
     scales: {
       x: {
@@ -311,28 +275,14 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       y: {
         title: { display: false },
         ticks: { font: { size: 10 } },
-        // min/max will be set directly on the chart instance
+        min: yRange[0],
+        max: yRange[1],
       },
     },
     elements: {
       line: { tension: 0.2 },
     },
-  }), [xMax]);
-
-  // When yRange changes, update the chart instance directly
-  useEffect(() => {
-    const chart = chartRef.current;
-    if (chart?.options?.scales?.y) {
-      chart.options.scales.y.min = yRange[0];
-      chart.options.scales.y.max = yRange[1];
-      // Also update overlay and playback indicator
-      if (chart.options.plugins) {
-        chart.options.plugins.loopOverlay = { loopStart, loopEnd };
-        chart.options.plugins.playbackIndicator = { playbackTime };
-      }
-      chart.update('none');
-    }
-  }, [yRange, loopStart, loopEnd, playbackTime]);
+  }), [xMax, yRange, loopStart, loopEnd, playbackTime]);
 
   const handleResetZoom = () => {
     if (chartRef.current) {
@@ -340,170 +290,70 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   };
 
-  const getChartCoordinates = (event: MouseEvent | TouchEvent): { x: number, y: number } | null => {
-    const canvas = canvasRef.current;
-    const chart = chartRef.current;
-    if (!canvas || !chart?.scales?.x || !chart.scales?.y) return null;
-
-    const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in event ? event.touches[0].clientX : event.clientX;
-    const clientY = 'touches' in event ? event.touches[0].clientY : event.clientY;
-    
-    const x = chart.scales.x.getValueForPixel?.(clientX - rect.left) ?? 0;
-    const y = chart.scales.y.getValueForPixel?.(clientY - rect.top) ?? 0;
-    
-    return { x, y };
-  };
-
-  // Function to check if mouse is near an edge
-  const getNearestEdge = (x: number): 'start' | 'end' | null => {
-    if (loopStart === undefined || loopEnd === undefined) return null;
-    
-    const chart = chartRef.current;
-    if (!chart || !chart.scales?.x) return null;
-    
-    const pixelsPerUnit = chart.scales.x.width / (chart.scales.x.max - chart.scales.x.min);
-    const threshold = 20 / pixelsPerUnit; // 20 pixels tolerance
-    
-    if (Math.abs(x - loopStart) <= threshold) return 'start';
-    if (Math.abs(x - loopEnd) <= threshold) return 'end';
-    return null;
-  };
-
-  // Add event listeners when the chart is ready
+  // Set up event listeners when canvas is ready
   useEffect(() => {
-    console.log('[Event Setup] Setting up event listeners');
     const canvas = canvasRef.current;
-    if (!canvas) {
-      console.log('[Event Setup] No canvas reference available');
-      return;
-    }
+    const dragController = dragControllerRef.current;
+    if (!canvas || !dragController) return;
 
     console.log('[Event Setup] Adding event listeners to canvas:', canvas);
     
-    const handleMouseDownCapture = (event: MouseEvent | TouchEvent) => {
-      const coords = getChartCoordinates(event);
-      if (!coords) return;
-
-      const edge = getNearestEdge(coords.x);
-      if (edge) {
-        event.preventDefault();
-        event.stopPropagation();
-        
-        console.log('[Mouse Down] Edge detected:', { edge, coords });
-        dragStateRef.current = {
-          isDragging: true,
-          edge,
-          initialX: coords.x,
-          currentValue: edge === 'start' ? loopStart ?? 0 : loopEnd ?? 0
-        };
-      }
-    };
-
-    const handleMouseMoveCapture = (event: MouseEvent | TouchEvent) => {
-      const dragState = dragStateRef.current;
-      if (!dragState.isDragging) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      
-      const coords = getChartCoordinates(event);
-      if (!coords) return;
-
-      if (dragState.edge && loopStart !== undefined && loopEnd !== undefined) {
-        console.log('[Mouse Move] Dragging:', {
-          type: event.type,
-          edge: dragState.edge,
-          coords
-        });
-
-        const chart = chartRef.current;
-        if (!chart?.options?.plugins) return;
-
-        const minX = chart.scales.x.min ?? 0;
-        const maxX = chart.scales.x.max ?? 5;
-        const newX = Math.max(minX, Math.min(maxX, coords.x));
-
-        if (dragState.edge === 'start' && newX < loopEnd) {
-          dragState.currentValue = newX;
-          chart.options.plugins!.loopOverlay = { 
-            loopStart: newX,
-            loopEnd
-          };
-          requestAnimationFrame(() => {
-            chart.draw();
-          });
-        } else if (dragState.edge === 'end' && newX > loopStart) {
-          dragState.currentValue = newX;
-          chart.options.plugins!.loopOverlay = { 
-            loopStart,
-            loopEnd: newX
-          };
-          requestAnimationFrame(() => {
-            chart.draw();
-          });
-        }
-      }
-    };
-
-    const handleMouseUpCapture = (event: MouseEvent | TouchEvent) => {
-      const dragState = dragStateRef.current;
-      if (!dragState.isDragging) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      
-      console.log('[Mouse Up] Finalizing drag:', dragState);
-      
-      if (dragState.currentValue !== null) {
-        // Update the loop values
-        if (dragState.edge === 'start') {
-          onLoopChange?.(dragState.currentValue, loopEnd ?? 0);
-        } else if (dragState.edge === 'end') {
-          onLoopChange?.(loopStart ?? 0, dragState.currentValue);
-        }
-      }
-      
-      // Reset drag state
-      dragStateRef.current = {
-        isDragging: false,
-        edge: null,
-        initialX: null,
-        currentValue: null
-      };
-    };
+    const handleMouseDown = (e: MouseEvent | TouchEvent) => dragController.handleMouseDown(e);
+    const handleMouseMove = (e: MouseEvent | TouchEvent) => dragController.handleMouseMove(e);
+    const handleMouseUp = (e: MouseEvent | TouchEvent) => dragController.handleMouseUp(e);
     
-    canvas.addEventListener('mousedown', handleMouseDownCapture, { capture: true });
-    canvas.addEventListener('touchstart', handleMouseDownCapture, { capture: true, passive: false });
-    canvas.addEventListener('mousemove', handleMouseMoveCapture, { capture: true });
-    canvas.addEventListener('touchmove', handleMouseMoveCapture, { capture: true, passive: false });
-    canvas.addEventListener('mouseup', handleMouseUpCapture, { capture: true });
-    canvas.addEventListener('touchend', handleMouseUpCapture, { capture: true });
-    canvas.addEventListener('mouseleave', handleMouseUpCapture, { capture: true });
-    canvas.addEventListener('touchcancel', handleMouseUpCapture, { capture: true });
+    canvas.addEventListener('mousedown', handleMouseDown, { capture: true });
+    canvas.addEventListener('touchstart', handleMouseDown, { capture: true, passive: false });
+    window.addEventListener('mousemove', handleMouseMove, { capture: true });
+    window.addEventListener('touchmove', handleMouseMove, { capture: true, passive: false });
+    window.addEventListener('mouseup', handleMouseUp, { capture: true });
+    window.addEventListener('touchend', handleMouseUp, { capture: true });
+    window.addEventListener('mouseleave', handleMouseUp, { capture: true });
+    window.addEventListener('touchcancel', handleMouseUp, { capture: true });
 
     return () => {
       console.log('[Event Setup] Removing event listeners');
-      canvas.removeEventListener('mousedown', handleMouseDownCapture, { capture: true });
-      canvas.removeEventListener('touchstart', handleMouseDownCapture, { capture: true });
-      canvas.removeEventListener('mousemove', handleMouseMoveCapture, { capture: true });
-      canvas.removeEventListener('touchmove', handleMouseMoveCapture, { capture: true });
-      canvas.removeEventListener('mouseup', handleMouseUpCapture, { capture: true });
-      canvas.removeEventListener('touchend', handleMouseUpCapture, { capture: true });
-      canvas.removeEventListener('mouseleave', handleMouseUpCapture, { capture: true });
-      canvas.removeEventListener('touchcancel', handleMouseUpCapture, { capture: true });
+      canvas.removeEventListener('mousedown', handleMouseDown, { capture: true });
+      canvas.removeEventListener('touchstart', handleMouseDown, { capture: true });
+      window.removeEventListener('mousemove', handleMouseMove, { capture: true });
+      window.removeEventListener('touchmove', handleMouseMove, { capture: true });
+      window.removeEventListener('mouseup', handleMouseUp, { capture: true });
+      window.removeEventListener('touchend', handleMouseUp, { capture: true });
+      window.removeEventListener('mouseleave', handleMouseUp, { capture: true });
+      window.removeEventListener('touchcancel', handleMouseUp, { capture: true });
     };
-  }, [loopStart, loopEnd, onLoopChange]);
+  }, [canvasRef.current, dragControllerRef.current]);
 
   // Store canvas reference when chart is mounted
   useEffect(() => {
-    console.log('[Canvas Setup] Chart ref changed:', chartRef.current);
     if (chartRef.current) {
-      const canvas = chartRef.current.canvas;
-      console.log('[Canvas Setup] Setting canvas ref:', canvas);
-      canvasRef.current = canvas;
+      canvasRef.current = chartRef.current.canvas;
     }
   }, [chartRef.current]);
+
+  // Update chart options when playback time changes
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart?.options?.plugins) return;
+
+    // During drag, only update playback indicator
+    if (dragControllerRef.current?.isDragging()) {
+      chart.options.plugins.playbackIndicator = { playbackTime };
+      requestAnimationFrame(() => {
+        if (!chart?.ctx) return;
+        chart.draw();
+      });
+      return;
+    }
+
+    // Not dragging - update both loop overlay and playback indicator
+    chart.options.plugins.loopOverlay = { loopStart, loopEnd };
+    chart.options.plugins.playbackIndicator = { playbackTime };
+    
+    requestAnimationFrame(() => {
+      chart.update('none');
+    });
+  }, [playbackTime]);
 
   return (
     <div
