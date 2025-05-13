@@ -26,9 +26,11 @@ interface LoopOverlayOptions {
 
 // Extend Chart.js types to include our plugins
 declare module 'chart.js' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends keyof ChartTypeRegistry> {
     loopOverlay?: LoopOverlayOptions;
     playbackIndicator?: { playbackTime?: number };
+    marginIndicator?: { showLeftMargin?: boolean; showRightMargin?: boolean };
   }
 }
 
@@ -73,6 +75,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Create a ref for the drag controller
   const dragControllerRef = useRef<DragController | null>(null);
 
+  // Track mouse position for margin indicators
+  const [showLeftMargin, setShowLeftMargin] = useState(false);
+  const [showRightMargin, setShowRightMargin] = useState(false);
+
   // Calculate xMax only when times changes
   const xMax = useMemo(() => {
     return times.length > 0 ? Math.max(2, times[times.length - 1]) : 5;
@@ -98,7 +104,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         chart: chartRef.current,
         onLoopChange,
         loopStart: loopStart ?? 0,
-        loopEnd: loopEnd ?? 0
+        loopEnd: loopEnd ?? 0,
+        marginThresholdPixels: 40 // Add margin threshold for edge dragging from outside visible area
       });
     }
   }, [chartRef.current]);
@@ -230,6 +237,62 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       
       ctx.restore();
     },
+  };
+
+  // Margin indicator plugin
+  const marginIndicatorPlugin: Plugin<'line'> = {
+    id: 'marginIndicator',
+    beforeDatasetsDraw: (chart: Chart) => {
+      const options = chart.options.plugins?.marginIndicator;
+      if (!options) return;
+      
+      const ctx = chart.ctx;
+      const chartArea = chart.chartArea;
+      
+      ctx.save();
+      
+      // Left margin indicator
+      if (options.showLeftMargin) {
+        ctx.fillStyle = 'rgba(0, 0, 255, 0.2)';
+        ctx.fillRect(
+          chartArea.left - 40,
+          chartArea.top,
+          40,
+          chartArea.bottom - chartArea.top
+        );
+        
+        // Draw arrow pointing right
+        ctx.fillStyle = 'rgba(0, 0, 255, 0.7)';
+        ctx.beginPath();
+        ctx.moveTo(chartArea.left - 25, chartArea.top + (chartArea.bottom - chartArea.top) / 2 - 10);
+        ctx.lineTo(chartArea.left - 5, chartArea.top + (chartArea.bottom - chartArea.top) / 2);
+        ctx.lineTo(chartArea.left - 25, chartArea.top + (chartArea.bottom - chartArea.top) / 2 + 10);
+        ctx.closePath();
+        ctx.fill();
+      }
+      
+      // Right margin indicator
+      if (options.showRightMargin) {
+        ctx.fillStyle = 'rgba(0, 0, 255, 0.2)';
+        ctx.fillRect(
+          chartArea.right,
+          chartArea.top,
+          40,
+          chartArea.bottom - chartArea.top
+        );
+        
+        // Draw arrow pointing left
+        ctx.fillStyle = 'rgba(0, 0, 255, 0.7)';
+        ctx.beginPath();
+        ctx.moveTo(chartArea.right + 25, chartArea.top + (chartArea.bottom - chartArea.top) / 2 - 10);
+        ctx.lineTo(chartArea.right + 5, chartArea.top + (chartArea.bottom - chartArea.top) / 2);
+        ctx.lineTo(chartArea.right + 25, chartArea.top + (chartArea.bottom - chartArea.top) / 2 + 10);
+        ctx.closePath();
+        ctx.fill();
+      }
+      
+      ctx.restore();
+    }
   };
 
   // Playback indicator plugin
@@ -381,6 +444,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       } satisfies Partial<ZoomPluginOptions>,
       loopOverlay: { loopStart, loopEnd },
       playbackIndicator: { playbackTime },
+      marginIndicator: {
+        showLeftMargin,
+        showRightMargin
+      },
     },
     scales: {
       x: {
@@ -402,7 +469,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     elements: {
       line: { tension: 0.2 },
     },
-  }), [xMax, yRange, loopStart, loopEnd, playbackTime, viewRange]);
+  }), [xMax, yRange, loopStart, loopEnd, playbackTime, viewRange, showLeftMargin, showRightMargin]);
 
   // Update chart options when playback time changes
   useEffect(() => {
@@ -481,6 +548,14 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const event = 'touches' in e ? e.touches[0] : e;
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
+      
+      // Check if mouse is in margin areas
+      if (chartRef.current) {
+        const chartArea = chartRef.current.chartArea;
+        setShowLeftMargin(x < chartArea.left && x >= chartArea.left - 40);
+        setShowRightMargin(x > chartArea.right && x <= chartArea.right + 40);
+      }
+      
       canvas.setAttribute('data-last-event', JSON.stringify({ 
         x, 
         y, 
@@ -492,6 +567,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const handleMouseDown = (e: MouseEvent | TouchEvent) => dragController.handleMouseDown(e);
     const handleMouseUp = (e: MouseEvent | TouchEvent) => {
       canvas.removeAttribute('data-last-event');
+      setShowLeftMargin(false);
+      setShowRightMargin(false);
       dragController.handleMouseUp(e);
     };
     
@@ -580,7 +657,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         }}
         className="pitch-graph-container"
       >
-        <Line ref={chartRef} data={chartData} options={options} plugins={[loopOverlayPlugin, playbackIndicatorPlugin]} />
+        <Line ref={chartRef} data={chartData} options={options} plugins={[loopOverlayPlugin, playbackIndicatorPlugin, marginIndicatorPlugin]} />
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
         <button
