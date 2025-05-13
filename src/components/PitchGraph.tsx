@@ -293,6 +293,17 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             const newRange = { min: validMin, max: validMax };
             zoomStateRef.current = newRange;
             setViewRange(newRange);
+
+            // Update chart scales directly for immediate feedback
+            chart.scales.x.min = validMin;
+            chart.scales.x.max = validMax;
+            if (chart.options.scales?.x) {
+              chart.options.scales.x.min = validMin;
+              chart.options.scales.x.max = validMax;
+            }
+            
+            // Force chart update
+            chart.update('none');
           }
         },
         pan: {
@@ -312,6 +323,17 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             const newRange = { min: validMin, max: validMax };
             zoomStateRef.current = newRange;
             setViewRange(newRange);
+
+            // Update chart scales directly for immediate feedback
+            chart.scales.x.min = validMin;
+            chart.scales.x.max = validMax;
+            if (chart.options.scales?.x) {
+              chart.options.scales.x.min = validMin;
+              chart.options.scales.x.max = validMax;
+            }
+            
+            // Force chart update
+            chart.update('none');
           }
         },
         limits: {
