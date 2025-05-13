@@ -68,6 +68,82 @@ const App: React.FC = () => {
 
   const [nativeChartInstance, setNativeChartInstance] = useState<Chart<'line', (number | null)[], number> | null>(null);
 
+  // Add drag state
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Add drag and drop handlers
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+
+    // Use the existing file handling logic
+    const url = URL.createObjectURL(file);
+    setNativeMediaUrl(url);
+    
+    if (file.type.startsWith('audio/')) {
+      setNativeMediaType('audio');
+      await extractPitchFromAudioBlob(file);
+    } else if (file.type.startsWith('video/')) {
+      setNativeMediaType('video');
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)() as AudioContextType;
+        const videoBuffer = await audioCtx.decodeAudioData(arrayBuffer).catch(() => null);
+        if (videoBuffer) {
+          const channelData = videoBuffer.getChannelData(0);
+          const sampleRate = videoBuffer.sampleRate;
+          const frameSize = 2048;
+          const hopSize = 256;
+          const detector = PitchDetector.forFloat32Array(frameSize);
+          const pitches: (number | null)[] = [];
+          const times: number[] = [];
+          for (let i = 0; i + frameSize < channelData.length; i += hopSize) {
+            const frame = channelData.slice(i, i + frameSize);
+            const [pitch, clarity] = detector.findPitch(frame, sampleRate);
+            if (pitch >= MIN_PITCH && pitch <= MAX_PITCH && clarity >= MIN_CLARITY) {
+              pitches.push(pitch);
+            } else {
+              pitches.push(null);
+            }
+            times.push(i / sampleRate);
+          }
+          const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+          setNativePitchData({ times, pitches: smoothed });
+        } else {
+          setNativePitchData({ times: [], pitches: [] });
+        }
+      } catch (error) {
+        console.error('Error extracting pitch from video:', error);
+        setNativePitchData({ times: [], pitches: [] });
+      }
+    } else {
+      setNativeMediaType(null);
+      setNativePitchData({ times: [], pitches: [] });
+    }
+  };
+
   // Extract pitch from user recording when audioBlob changes
   React.useEffect(() => {
     if (!audioBlob) return;
@@ -381,7 +457,48 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="App" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div 
+      className="app-container"
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        position: 'relative',
+        minHeight: '100vh',
+      }}
+    >
+      {isDragging && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(25, 118, 210, 0.1)',
+            border: '2px dashed #1976d2',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            pointerEvents: 'none',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'white',
+              padding: '20px 40px',
+              borderRadius: '8px',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              fontSize: '1.2em',
+              color: '#1976d2',
+            }}
+          >
+            Drop audio/video file here
+          </div>
+        </div>
+      )}
       <div className="container">
         <h1 className="chorusing-title">Chorusing Drill</h1>
         <main style={{ flex: 1, padding: '1rem 0', width: '100%' }}>
