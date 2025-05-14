@@ -29,8 +29,8 @@ export interface PitchData {
 
 const MIN_PITCH = 60;
 const MAX_PITCH = 500;
-const MIN_CLARITY = 0.8;
-const MEDIAN_FILTER_SIZE = 5;
+const MIN_CLARITY = 0.6;
+const MEDIAN_FILTER_SIZE = 10;
 
 // Median filter for smoothing
 function medianFilter(arr: (number | null)[], windowSize: number): (number | null)[] {
