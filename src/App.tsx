@@ -1,10 +1,11 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import Footer from './components/Footer'
 import Recorder from './components/Recorder'
 import PitchGraphWithControls from './components/PitchGraph'
 import type { Chart } from 'chart.js';
 import './App.css'
 import { PitchDetector } from 'pitchy'
+import { PitchDataManager } from './services/PitchDataManager'
 
 // Median filter for smoothing
 function medianFilter(arr: (number | null)[], windowSize: number): (number | null)[] {
@@ -70,6 +71,14 @@ const App: React.FC = () => {
 
   // Add drag state
   const [isDragging, setIsDragging] = useState(false);
+
+  // Add PitchDataManager
+  const pitchManager = useRef(new PitchDataManager({
+    thresholdDuration: 30, // 30 seconds
+    segmentDuration: 10,   // 10 second segments
+    preloadSegments: 1,    // Load one segment ahead
+    maxCachedSegments: 6   // Keep 6 segments in memory
+  }));
 
   // Add drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
@@ -210,53 +219,39 @@ const App: React.FC = () => {
     }
   }
 
-  // Handle file input change
+  // Modify handleNativeFileChange
   const handleNativeFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const url = URL.createObjectURL(file)
-    setNativeMediaUrl(url)
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const url = URL.createObjectURL(file);
+    setNativeMediaUrl(url);
+    
     if (file.type.startsWith('audio/')) {
-      setNativeMediaType('audio')
-      await extractPitchFromAudioBlob(file)
-    } else if (file.type.startsWith('video/')) {
-      setNativeMediaType('video')
+      setNativeMediaType('audio');
       try {
-        const arrayBuffer = await file.arrayBuffer()
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)() as AudioContextType
-        const videoBuffer = await audioCtx.decodeAudioData(arrayBuffer).catch(() => null)
-        if (videoBuffer) {
-          const channelData = videoBuffer.getChannelData(0)
-          const sampleRate = videoBuffer.sampleRate
-          const frameSize = 2048
-          const hopSize = 256
-          const detector = PitchDetector.forFloat32Array(frameSize)
-          const pitches: (number | null)[] = []
-          const times: number[] = []
-          for (let i = 0; i + frameSize < channelData.length; i += hopSize) {
-            const frame = channelData.slice(i, i + frameSize)
-            const [pitch, clarity] = detector.findPitch(frame, sampleRate)
-            if (pitch >= MIN_PITCH && pitch <= MAX_PITCH && clarity >= MIN_CLARITY) {
-              pitches.push(pitch)
-            } else {
-              pitches.push(null)
-            }
-            times.push(i / sampleRate)
-          }
-          const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE)
-          setNativePitchData({ times, pitches: smoothed })
-        } else {
-          setNativePitchData({ times: [], pitches: [] })
-        }
+        await pitchManager.current.initialize(file);
+        const initialData = pitchManager.current.getPitchDataForTimeRange(0, 30); // Get first 30 seconds
+        setNativePitchData(initialData);
       } catch (error) {
-        console.error('Error extracting pitch from video:', error);
-        setNativePitchData({ times: [], pitches: [] })
+        console.error('Error processing audio:', error);
+        setNativePitchData({ times: [], pitches: [] });
+      }
+    } else if (file.type.startsWith('video/')) {
+      setNativeMediaType('video');
+      try {
+        await pitchManager.current.initialize(file);
+        const initialData = pitchManager.current.getPitchDataForTimeRange(0, 30); // Get first 30 seconds
+        setNativePitchData(initialData);
+      } catch (error) {
+        console.error('Error processing video:', error);
+        setNativePitchData({ times: [], pitches: [] });
       }
     } else {
-      setNativeMediaType(null)
-      setNativePitchData({ times: [], pitches: [] })
+      setNativeMediaType(null);
+      setNativePitchData({ times: [], pitches: [] });
     }
-  }
+  };
 
   // Ensure video is seeked to 0.01 and loaded when a new video is loaded (robust for short files)
   React.useEffect(() => {
@@ -456,6 +451,30 @@ const App: React.FC = () => {
     return null;
   };
 
+  // Add debounced view change handler
+  const viewChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  const handleViewChange = useCallback(async (startTime: number, endTime: number) => {
+    // Clear any pending timeout
+    if (viewChangeTimeoutRef.current) {
+      clearTimeout(viewChangeTimeoutRef.current);
+    }
+
+    // Set new timeout
+    viewChangeTimeoutRef.current = setTimeout(async () => {
+      try {
+        // Only load segments if we're in progressive mode
+        if (pitchManager.current.isInProgressiveMode()) {
+          await pitchManager.current.loadSegmentsForTimeRange(startTime, endTime);
+          const visibleData = pitchManager.current.getPitchDataForTimeRange(startTime, endTime);
+          setNativePitchData(visibleData);
+        }
+      } catch (error) {
+        console.error('Error loading pitch data for time range:', error);
+      }
+    }, 100); // 100ms debounce
+  }, []);
+
   return (
     <div 
       className="app-container"
@@ -643,7 +662,9 @@ const App: React.FC = () => {
                   getActiveMediaElement()!.currentTime = start;
                 }
                 fitYAxisToLoop();
+                handleViewChange(start, end);
               }}
+              onViewChange={handleViewChange}
             />
           </section>
 
