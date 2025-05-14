@@ -82,6 +82,9 @@ const App: React.FC = () => {
 
   // Add a ref to track last valid user-set loop region
   const userSetLoopRef = useRef<{start: number, end: number} | null>(null);
+  
+  // Add a ref to track when a new file is being loaded
+  const isLoadingNewFileRef = useRef<boolean>(false);
 
   // Add drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
@@ -109,6 +112,14 @@ const App: React.FC = () => {
 
     const file = e.dataTransfer.files[0];
     if (!file) return;
+
+    // Set flag to indicate we're loading a completely new file
+    isLoadingNewFileRef.current = true;
+    console.log('[App] Loading new file via drop, setting isLoadingNewFile flag:', isLoadingNewFileRef.current);
+
+    // Reset user-set loop region when loading a new file
+    userSetLoopRef.current = null;
+    console.log('[App] New file loaded, clearing user-set loop region');
 
     // Use the existing file handling logic
     const url = URL.createObjectURL(file);
@@ -142,6 +153,9 @@ const App: React.FC = () => {
       setNativeMediaType(null);
       setNativePitchData({ times: [], pitches: [] });
     }
+    
+    // Don't reset the flag here - it will be reset by a useEffect
+    console.log('[App] File loading complete, isLoadingNewFile still set:', isLoadingNewFileRef.current);
   };
 
   // Extract pitch from user recording when audioBlob changes
@@ -184,6 +198,14 @@ const App: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     
+    // Set flag to indicate we're loading a completely new file
+    isLoadingNewFileRef.current = true;
+    console.log('[App] Loading new file via input, setting isLoadingNewFile flag:', isLoadingNewFileRef.current);
+    
+    // Reset user-set loop region when loading a new file
+    userSetLoopRef.current = null;
+    console.log('[App] New file loaded, clearing user-set loop region');
+    
     const url = URL.createObjectURL(file);
     setNativeMediaUrl(url);
     
@@ -215,6 +237,9 @@ const App: React.FC = () => {
       setNativeMediaType(null);
       setNativePitchData({ times: [], pitches: [] });
     }
+    
+    // Don't reset the flag here - it will be reset by a useEffect
+    console.log('[App] File loading complete, isLoadingNewFile still set:', isLoadingNewFileRef.current);
   };
 
   // Ensure video is seeked to 0.01 and loaded when a new video is loaded (robust for short files)
@@ -232,11 +257,30 @@ const App: React.FC = () => {
 
   // Update loop end when native media is loaded - only if no user-set region exists
   React.useEffect(() => {
-    // Skip if we have a user-set loop region - that takes precedence
-    if (userSetLoopRef.current) {
-      console.log('[App] Skipping initial loop setup due to existing user-set region:', userSetLoopRef.current);
+    // Only proceed with reset if we're loading a completely new file
+    if (!isLoadingNewFileRef.current) {
+      console.log('[App] Pitch data changed, but not loading a new file. Preserving loop region.', {
+        isLoadingNewFile: isLoadingNewFileRef.current,
+        pitchDataLength: nativePitchData.times.length,
+        loopStart,
+        loopEnd
+      });
+      
+      // Just update the y-axis without changing the loop region
+      if (nativePitchData.times.length > 0) {
+        fitYAxisToLoop();
+      }
       return;
     }
+    
+    console.log('[App] Setting loop region for newly loaded file', {
+      isLoadingNewFile: isLoadingNewFileRef.current,
+      pitchDataLength: nativePitchData.times.length
+    });
+    
+    // We always want to reset the loop region when loading a new file,
+    // regardless of whether the user had set a custom loop before
+    // since this is a completely new file with potentially different length
     
     const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
     
@@ -246,6 +290,13 @@ const App: React.FC = () => {
       const initialViewDuration = 10;
       setLoopStartWithLogging(0);
       setLoopEndWithLogging(initialViewDuration);
+      
+      // Set the user-set loop to this region, as if the user created this loop
+      userSetLoopRef.current = { start: 0, end: initialViewDuration };
+      console.log('[App] New file loaded (long), setting loop region to first 10 seconds:', {
+        duration,
+        loop: userSetLoopRef.current
+      });
       
       // Update chart view range if chart is ready
       if (nativeChartInstance) {
@@ -274,8 +325,16 @@ const App: React.FC = () => {
         }
       }
     } else {
+      // For short videos, set loop to entire duration
       setLoopStartWithLogging(0);
       setLoopEndWithLogging(duration);
+      
+      // Set the user-set loop to this region, as if the user created this loop
+      userSetLoopRef.current = { start: 0, end: duration };
+      console.log('[App] New file loaded (short), setting loop region to entire duration:', {
+        duration,
+        loop: userSetLoopRef.current
+      });
     }
     
     fitYAxisToLoop();
@@ -317,7 +376,7 @@ const App: React.FC = () => {
   // Add ref to track initial setup
   const initialSetupDoneRef = useRef(false);
 
-  // Modify handleViewChange to prevent repeated triggers
+  // Modify handleViewChange to check the loading flag
   const handleViewChange = useCallback(async (startTime: number, endTime: number, preservedLoopStart?: number, preservedLoopEnd?: number) => {
     // Clear any pending timeout
     if (viewChangeTimeoutRef.current) {
@@ -344,17 +403,24 @@ const App: React.FC = () => {
       currentLoopStart: loopStart,
       currentLoopEnd: loopEnd,
       userSetLoop,
+      isLoadingNewFile: isLoadingNewFileRef.current,
       stack: new Error().stack?.split('\n').slice(1, 3).join('\n')
     });
 
-    // Immediately preserve loop region
-    const currentLoopStart = loopRegionToRestore.start;
-    const currentLoopEnd = loopRegionToRestore.end;
-    
-    // Only update if values have changed
-    if (Math.abs(loopStart - currentLoopStart) > 0.001 || Math.abs(loopEnd - currentLoopEnd) > 0.001) {
-      setLoopStartWithLogging(currentLoopStart);
-      setLoopEndWithLogging(currentLoopEnd);
+    // Only preserve loop region if we're not loading a new file
+    // If we're loading a new file, let the file loading effect handle setting the loop region
+    if (!isLoadingNewFileRef.current) {
+      // Immediately preserve loop region
+      const currentLoopStart = loopRegionToRestore.start;
+      const currentLoopEnd = loopRegionToRestore.end;
+      
+      // Only update if values have changed
+      if (Math.abs(loopStart - currentLoopStart) > 0.001 || Math.abs(loopEnd - currentLoopEnd) > 0.001) {
+        setLoopStartWithLogging(currentLoopStart);
+        setLoopEndWithLogging(currentLoopEnd);
+      }
+    } else {
+      console.log('[App] Skipping loop region preservation in handleViewChange - loading new file');
     }
 
     // Set new timeout for data loading (separated from loop region handling)
@@ -374,10 +440,11 @@ const App: React.FC = () => {
             isInitialLoad,
             isLongVideo,
             duration,
-            preservedLoopRegion: { start: currentLoopStart, end: currentLoopEnd },
+            preservedLoopRegion: loopRegionToRestore,
             currentLoopStart: loopStart,
             currentLoopEnd: loopEnd,
-            userSetLoop
+            userSetLoop,
+            isLoadingNewFile: isLoadingNewFileRef.current
           });
           
           // For initial load of long videos, force loading only first segment
@@ -387,10 +454,11 @@ const App: React.FC = () => {
             const visibleData = pitchManager.current.getPitchDataForTimeRange(0, 10);
             
             // Set initial loop region for first load only if no user-set region
-            if (!userSetLoop) {
+            // and we're not in the middle of loading a new file
+            if (!userSetLoop && !isLoadingNewFileRef.current) {
               setLoopStartWithLogging(0);
               setLoopEndWithLogging(10);
-            } else {
+            } else if (userSetLoop && !isLoadingNewFileRef.current) {
               // Restore user-set values
               setLoopStartWithLogging(userSetLoop.start);
               setLoopEndWithLogging(userSetLoop.end);
@@ -410,26 +478,32 @@ const App: React.FC = () => {
             // Update pitch data without modifying loop region
             setNativePitchData(visibleData);
             
-            // Ensure loop region is still correct after data loading
-            // First check for userSetLoop, which takes highest priority
-            if (userSetLoop) {
-              if (loopStart !== userSetLoop.start || loopEnd !== userSetLoop.end) {
-                console.log('[App] Re-applying user-set loop region after data loading:', {
-                  current: { start: loopStart, end: loopEnd },
-                  userSet: userSetLoop
-                });
-                setLoopStartWithLogging(userSetLoop.start);
-                setLoopEndWithLogging(userSetLoop.end);
+            // Only check and restore loop region if we're not loading a new file
+            if (!isLoadingNewFileRef.current) {
+              // Ensure loop region is still correct after data loading
+              // First check for userSetLoop, which takes highest priority
+              if (userSetLoop) {
+                if (loopStart !== userSetLoop.start || loopEnd !== userSetLoop.end) {
+                  console.log('[App] Re-applying user-set loop region after data loading:', {
+                    current: { start: loopStart, end: loopEnd },
+                    userSet: userSetLoop
+                  });
+                  setLoopStartWithLogging(userSetLoop.start);
+                  setLoopEndWithLogging(userSetLoop.end);
+                }
               }
-            }
-            // Then check for preserved values
-            else if (Math.abs(loopStart - currentLoopStart) > 0.001 || Math.abs(loopEnd - currentLoopEnd) > 0.001) {
-              console.log('[App] Re-applying preserved loop region after data loading:', {
-                current: { start: loopStart, end: loopEnd },
-                preserved: { start: currentLoopStart, end: currentLoopEnd }
-              });
-              setLoopStartWithLogging(currentLoopStart);
-              setLoopEndWithLogging(currentLoopEnd);
+              // Then check for preserved values
+              else if (Math.abs(loopStart - loopRegionToRestore.start) > 0.001 || 
+                       Math.abs(loopEnd - loopRegionToRestore.end) > 0.001) {
+                console.log('[App] Re-applying preserved loop region after data loading:', {
+                  current: { start: loopStart, end: loopEnd },
+                  preserved: loopRegionToRestore
+                });
+                setLoopStartWithLogging(loopRegionToRestore.start);
+                setLoopEndWithLogging(loopRegionToRestore.end);
+              }
+            } else {
+              console.log('[App] Skipping loop region restoration - loading new file');
             }
           }
         }
@@ -441,12 +515,6 @@ const App: React.FC = () => {
 
   // Consolidate initial view setup into a single effect
   React.useEffect(() => {
-    // Only proceed if we don't have a user-set loop region
-    if (userSetLoopRef.current) {
-      console.log('[App] Skipping initial view setup due to existing user-set region:', userSetLoopRef.current);
-      return;
-    }
-    
     if (nativeChartInstance && nativePitchData.times.length > 0 && !initialSetupDoneRef.current) {
       const duration = nativePitchData.times[nativePitchData.times.length - 1];
       
@@ -802,6 +870,21 @@ const App: React.FC = () => {
     });
     setLoopEnd(value);
   };
+
+  // Add a new useEffect to reset the loading flag after data is processed
+  React.useEffect(() => {
+    // If we had the loading flag set, and now we have pitch data
+    if (isLoadingNewFileRef.current && nativePitchData.times.length > 0) {
+      // Wait for the next render cycle to make sure other effects have run
+      // This gives the useEffect that sets the loop region time to run
+      const timerId = setTimeout(() => {
+        console.log('[App] Resetting isLoadingNewFile flag after data loaded, delay complete');
+        isLoadingNewFileRef.current = false;
+      }, 100); // Give some time for other effects to process
+      
+      return () => clearTimeout(timerId);
+    }
+  }, [nativePitchData]);
 
   return (
     <div 
