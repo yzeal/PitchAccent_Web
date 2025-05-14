@@ -68,8 +68,10 @@ export class PitchDataManager {
       const url = URL.createObjectURL(file);
       const audio = new Audio(url);
       audio.addEventListener('loadedmetadata', () => {
+        const duration = audio.duration;
         URL.revokeObjectURL(url);
-        resolve(audio.duration);
+        console.log('[PitchDataManager] Detected file duration:', duration, 'seconds');
+        resolve(duration);
       });
       audio.addEventListener('error', () => {
         URL.revokeObjectURL(url);
@@ -81,10 +83,15 @@ export class PitchDataManager {
   async initialize(file: File) {
     this.currentFile = file;
     this.totalDuration = await this.getFileDuration(file);
+    console.log('[PitchDataManager] File duration:', this.totalDuration, 'seconds');
+    console.log('[PitchDataManager] Threshold duration:', this.config.thresholdDuration, 'seconds');
+    
     this.isProgressiveMode = this.totalDuration > this.config.thresholdDuration;
+    console.log('[PitchDataManager] Using progressive mode:', this.isProgressiveMode);
 
     if (!this.isProgressiveMode) {
       // Process entire file at once
+      console.log('[PitchDataManager] Processing entire file at once');
       const fullPitchData = await this.processEntireFile(file);
       this.segments.set(0, {
         startTime: 0,
@@ -94,8 +101,20 @@ export class PitchDataManager {
         isProcessed: true
       });
     } else {
-      // Just initialize segment map
+      // Initialize segment map
+      console.log('[PitchDataManager] Initializing segments for progressive loading');
       this.initializeSegments();
+      
+      // Load initial segments (first visible segment plus preload)
+      console.log('[PitchDataManager] Loading initial segments');
+      const initialEndSegment = Math.min(
+        this.config.preloadSegments,
+        Math.ceil(this.totalDuration / this.config.segmentDuration) - 1
+      );
+      for (let i = 0; i <= initialEndSegment; i++) {
+        console.log(`[PitchDataManager] Processing initial segment ${i}`);
+        await this.processSegment(i);
+      }
     }
   }
 
@@ -140,14 +159,20 @@ export class PitchDataManager {
   }
 
   async loadSegmentsForTimeRange(startTime: number, endTime: number) {
-    if (!this.isProgressiveMode) return;
+    if (!this.isProgressiveMode) {
+      console.log('[PitchDataManager] Skipping segment load - not in progressive mode');
+      return;
+    }
 
     const startSegment = Math.floor(startTime / this.config.segmentDuration);
     const endSegment = Math.floor(endTime / this.config.segmentDuration);
     
+    console.log(`[PitchDataManager] Loading segments ${startSegment} to ${endSegment} (${startTime}s to ${endTime}s)`);
+    
     // Load visible segments plus preload
     for (let i = startSegment; i <= endSegment + this.config.preloadSegments; i++) {
       if (this.segments.has(i) && !this.segments.get(i)!.isProcessed) {
+        console.log(`[PitchDataManager] Processing segment ${i}`);
         await this.processSegment(i);
       }
     }
@@ -163,6 +188,8 @@ export class PitchDataManager {
     const file = this.currentFile;
     if (!file) throw new Error('No file loaded');
 
+    console.log(`[PitchDataManager] Processing segment ${segmentIndex} (${segment.startTime}s to ${segment.endTime}s)`);
+
     const arrayBuffer = await file.arrayBuffer();
     const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
     const channelData = audioBuffer.getChannelData(0);
@@ -171,6 +198,8 @@ export class PitchDataManager {
     // Calculate sample indices for this segment
     const startSample = Math.floor(segment.startTime * sampleRate);
     const endSample = Math.floor(segment.endTime * sampleRate);
+    
+    console.log(`[PitchDataManager] Segment ${segmentIndex} samples: ${startSample} to ${endSample}`);
     
     const frameSize = 2048;
     const hopSize = 256;
@@ -191,6 +220,8 @@ export class PitchDataManager {
     }
 
     const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+    
+    console.log(`[PitchDataManager] Segment ${segmentIndex} processed: ${pitches.length} points`);
     
     // Update the segment with processed data
     this.segments.set(segmentIndex, {

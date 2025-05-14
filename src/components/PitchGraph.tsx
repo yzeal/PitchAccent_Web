@@ -85,10 +85,13 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   }, [times]);
 
   // Add a ref to store the current zoom state
-  const zoomStateRef = useRef<{ min: number; max: number }>({ min: 0, max: xMax });
+  const zoomStateRef = useRef<{ min: number; max: number }>({ min: 0, max: 5 });
 
   // Add a state to track the view range
-  const [viewRange, setViewRange] = useState<{ min: number; max: number }>({ min: 0, max: xMax });
+  const [viewRange, setViewRange] = useState<{ min: number; max: number }>({ min: 0, max: 5 });
+
+  // Add ref to track previous view range
+  const prevViewRangeRef = useRef<{ min: number; max: number }>({ min: 0, max: 0 });
 
   // Add zoom state ref
   const isZoomingRef = useRef(false);
@@ -103,9 +106,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
 
   // Add state for touch pan
   const touchPanRef = useRef<{ x: number; y: number } | null>(null);
-
-  // Add ref to track previous view range
-  const prevViewRangeRef = useRef<{ min: number; max: number }>({ min: 0, max: 0 });
 
   // Initialize drag controller when chart is ready
   useEffect(() => {
@@ -168,12 +168,32 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [pitches, yFit]);
 
+  // Initialize zoom state and view range when xMax changes
+  useEffect(() => {
+    if (xMax !== zoomStateRef.current.max) {
+      const newRange = { min: 0, max: xMax };
+      zoomStateRef.current = newRange;
+      setViewRange(newRange);
+      
+      // Update chart scales if chart exists
+      if (chartRef.current?.options?.scales?.x) {
+        chartRef.current.options.scales.x.min = 0;
+        chartRef.current.options.scales.x.max = xMax;
+        chartRef.current.scales.x.min = 0;
+        chartRef.current.scales.x.max = xMax;
+        chartRef.current.update('none');
+      }
+    }
+  }, [xMax]);
+
   // Modify useEffect to call onViewChange when view range changes
   useEffect(() => {
     if (onViewChange && viewRange.min !== undefined && viewRange.max !== undefined) {
-      // Only trigger if the view range has actually changed
-      if (viewRange.min !== prevViewRangeRef.current.min || 
-          viewRange.max !== prevViewRangeRef.current.max) {
+      // Only trigger if the view range has actually changed and is valid
+      if ((viewRange.min !== prevViewRangeRef.current.min || 
+           viewRange.max !== prevViewRangeRef.current.max) &&
+          !isNaN(viewRange.min) && !isNaN(viewRange.max) &&
+          viewRange.max > viewRange.min) {
         prevViewRangeRef.current = { ...viewRange };
         onViewChange(viewRange.min, viewRange.max);
       }
@@ -675,15 +695,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       line: { tension: 0.2 },
     },
   })}, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max]);
-
-  // Initialize zoom state on mount or when data changes
-  useEffect(() => {
-    if (zoomStateRef.current.max === 0 || zoomStateRef.current.max < xMax) {
-      const newRange = { min: 0, max: xMax };
-      zoomStateRef.current = newRange;
-      setViewRange(newRange);
-    }
-  }, [xMax]);
 
   // Auto-reset zoom when new pitch data is loaded
   useEffect(() => {
