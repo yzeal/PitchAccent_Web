@@ -45,6 +45,7 @@ export interface PitchGraphWithControlsProps {
   onLoopChange?: (start: number, end: number) => void;
   onViewChange?: (startTime: number, endTime: number) => void;
   showNavigationHints?: boolean;
+  totalDuration?: number;
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -68,6 +69,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     onLoopChange,
     onViewChange,
     showNavigationHints = false,
+    totalDuration,
   } = props;
   
   const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
@@ -77,14 +79,23 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Create a ref for the drag controller
   const dragControllerRef = useRef<DragController | null>(null);
 
+  // Track user interaction state
+  const isUserInteractingRef = useRef(false);
+
   // Track mouse position for margin indicators
   const [showLeftMargin, setShowLeftMargin] = useState(false);
   const [showRightMargin, setShowRightMargin] = useState(false);
 
   // Calculate xMax only when times changes
   const xMax = useMemo(() => {
-    return times.length > 0 ? Math.max(2, times[times.length - 1]) : 5;
-  }, [times]);
+    return totalDuration || (times.length > 0 ? times[times.length - 1] : 1);
+  }, [times, totalDuration]);
+
+  // Track the total available range (either from loaded data or known total duration)
+  const [totalDataRange, setTotalDataRange] = useState<{ min: number; max: number }>({ 
+    min: 0, 
+    max: totalDuration || (times.length > 0 ? times[times.length - 1] : 1)
+  });
 
   // Add a ref to store the current zoom state
   const zoomStateRef = useRef<{ min: number; max: number }>({ min: 0, max: 5 });
@@ -149,7 +160,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         onLoopChange,
         loopStart: loopStart ?? 0,
         loopEnd: loopEnd ?? 0,
-        marginThresholdPixels: 40 // Add margin threshold for edge dragging from outside visible area
+        marginThresholdPixels: 40, // Add margin threshold for edge dragging from outside visible area
+        maxDragLimit: totalDuration || totalDataRange.max // Add maximum drag limit
       });
     }
   }, [chartRef.current]);
@@ -161,10 +173,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         chart: chartRef.current,
         onLoopChange,
         loopStart: loopStart ?? 0,
-        loopEnd: loopEnd ?? 0
+        loopEnd: loopEnd ?? 0,
+        maxDragLimit: totalDuration || totalDataRange.max // Update maximum drag limit
       });
     }
-  }, [chartRef.current, onLoopChange, loopStart, loopEnd]);
+  }, [chartRef.current, onLoopChange, loopStart, loopEnd, totalDuration, totalDataRange.max]);
 
   useEffect(() => {
     if (onChartReady) {
@@ -202,26 +215,61 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [pitches, yFit]);
 
-  // Initialize zoom state and view range when xMax changes
+  // Update total data range when new data arrives or total duration changes
+  useEffect(() => {
+    const newMax = totalDuration || (times.length > 0 ? times[times.length - 1] : 1);
+    console.log('[PitchGraph] Updating total data range:', {
+      oldRange: totalDataRange,
+      newMax,
+      dataPoints: times.length,
+      totalDuration,
+      isUserInteracting: isUserInteractingRef.current
+    });
+    
+    // Always reset zoom state when total duration changes
+    const updatedRange = {
+      min: 0,
+      max: newMax
+    };
+    
+    setTotalDataRange(updatedRange);
+    zoomStateRef.current = { ...updatedRange };
+    setViewRange(updatedRange);
+    
+    // Update chart if it exists
+    if (chartRef.current) {
+      if (chartRef.current.options.scales?.x) {
+        chartRef.current.options.scales.x.min = updatedRange.min;
+        chartRef.current.options.scales.x.max = updatedRange.max;
+      }
+      chartRef.current.update('none');
+    }
+  }, [times, totalDuration]);
+
+  // Remove the old initialization effect since we handle it in the data range update
   useEffect(() => {
     if (chartRef.current) {
-      // Always reset zoom state when new data is loaded
-      const newRange = { min: 0, max: xMax };
-      zoomStateRef.current = newRange;
-      setViewRange(newRange);
-      
-      // Update chart scales directly
-      if (chartRef.current.options.scales?.x) {
-        chartRef.current.options.scales.x.min = 0;
-        chartRef.current.options.scales.x.max = xMax;
-      }
-      chartRef.current.scales.x.min = 0;
-      chartRef.current.scales.x.max = xMax;
-      chartRef.current.update('none');
+      console.log('[PitchGraph] Updating chart range:', {
+        currentZoomState: zoomStateRef.current,
+        newDataRange: totalDataRange,
+        trigger: 'data range change'
+      });
 
-      console.log('[PitchGraph] Reset zoom state for new data:', { xMax, newRange });
+      // Only set initial view if we don't have a valid view range yet
+      if (zoomStateRef.current.max === 0 || zoomStateRef.current.min === zoomStateRef.current.max) {
+        const initialRange = { min: 0, max: totalDataRange.max };
+        zoomStateRef.current = initialRange;
+        setViewRange(initialRange);
+        
+        // Update chart scales directly
+        if (chartRef.current.options.scales?.x) {
+          chartRef.current.options.scales.x.min = initialRange.min;
+          chartRef.current.options.scales.x.max = initialRange.max;
+        }
+        chartRef.current.update('none');
+      }
     }
-  }, [xMax, times.length]); // Add times.length as dependency to ensure reset on new data
+  }, [totalDataRange]);
 
   // Modify useEffect to call onViewChange when view range changes
   useEffect(() => {
@@ -237,18 +285,17 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [viewRange, onViewChange]);
 
-  // Modify handleWheel to update viewRange
+  // Handle wheel events for zooming
   const handleWheel = (e: WheelEvent) => {
     const chart = chartRef.current;
     if (!chart || dragControllerRef.current?.isDragging()) return;
 
     e.preventDefault();
-
+    isUserInteractingRef.current = true;
     isZoomingRef.current = true;
     
     const { min: currentMin, max: currentMax } = zoomStateRef.current;
     const mouseX = e.offsetX;
-    const chartArea = chart.chartArea;
     
     // Calculate the data value at mouse position
     const xScale = chart.scales.x;
@@ -259,29 +306,54 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const zoomFactor = e.deltaY > 0 ? 1.1 : 0.9;
     
     // Calculate new range while keeping mouse position fixed
-    const newRange = (currentMax - currentMin) * zoomFactor;
-    const mouseRatio = (mouseX - chartArea.left) / (chartArea.right - chartArea.left);
-    const newMin = mouseDataX - (newRange * mouseRatio);
-    const newMax = newMin + newRange;
+    const currentRange = currentMax - currentMin;
+    const newRange = currentRange * zoomFactor;
     
-    // Apply limits
-    const finalMin = Math.max(0, newMin);
-    const finalMax = Math.min(xMax, Math.max(finalMin + 0.5, newMax));
+    // Enforce minimum (1s) and maximum view range
+    const minViewRange = 1;
+    const maxViewRange = totalDuration || totalDataRange.max;
     
-    // Update zoom state and view range
-    zoomStateRef.current = { min: finalMin, max: finalMax };
-    setViewRange({ min: finalMin, max: finalMax });
+    // Don't allow zooming out beyond video duration
+    if (newRange > maxViewRange) return;
+    
+    // Don't allow zooming in beyond minimum view range
+    if (newRange < minViewRange) return;
+
+    // Calculate how far the mouse is between the left and right edge (0 to 1)
+    const mouseRatio = (mouseDataX - currentMin) / currentRange;
+    
+    // Apply the zoom around the mouse position
+    let newMin = mouseDataX - (mouseRatio * newRange);
+    let newMax = mouseDataX + ((1 - mouseRatio) * newRange);
+
+    // Adjust if we go out of bounds
+    if (newMin < 0) {
+      newMax += Math.abs(newMin);
+      newMin = 0;
+    }
+    if (newMax > maxViewRange) {
+      newMin = Math.max(0, newMin - (newMax - maxViewRange));
+      newMax = maxViewRange;
+    }
+
+    // Update zoom state
+    zoomStateRef.current = { min: newMin, max: newMax };
     
     // Update chart scales
     if (chart.options.scales?.x) {
-      chart.options.scales.x.min = finalMin;
-      chart.options.scales.x.max = finalMax;
+      chart.options.scales.x.min = newMin;
+      chart.options.scales.x.max = newMax;
     }
-    
-    // Update chart
     chart.update('none');
     
-    isZoomingRef.current = false;
+    // Notify parent of view change
+    onViewChange?.(newMin, newMax);
+
+    // Reset interaction flags after a short delay
+    setTimeout(() => {
+      isZoomingRef.current = false;
+      isUserInteractingRef.current = false;
+    }, 100);
   };
 
   // Modify handleMouseMove for panning to update viewRange
@@ -688,45 +760,53 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Memoize options without zoom plugin
   const options = useMemo(() => {
     return ({
-    responsive: true,
-    maintainAspectRatio: false,
-    animation: {
-      duration: 0
-    },
-    plugins: {
-      legend: { display: false },
-      title: { display: false },
-      tooltip: { 
-        enabled: !isMobile,  // Use memoized value
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 0
       },
-      loopOverlay: { loopStart, loopEnd },
-      playbackIndicator: { playbackTime: 0 },
-      marginIndicator: {
-        showLeftMargin,
-        showRightMargin
-      },
-    },
-    scales: {
-      x: {
-        type: 'linear' as const,
+      plugins: {
+        legend: { display: false },
         title: { display: false },
-        ticks: { maxTicksLimit: 8, font: { size: 10 } },
-        min: zoomStateRef.current.min,
-        max: zoomStateRef.current.max,
-        grace: '5%',
-        bounds: 'data' as const
+        tooltip: { 
+          enabled: !isMobile,
+        },
+        loopOverlay: { 
+          loopStart: Math.min(loopStart || 0, totalDataRange.max), 
+          loopEnd: Math.min(loopEnd || 0, totalDataRange.max) 
+        },
+        playbackIndicator: { playbackTime: 0 },
+        marginIndicator: {
+          showLeftMargin,
+          showRightMargin
+        },
       },
-      y: {
-        title: { display: false },
-        ticks: { font: { size: 10 } },
-        min: yRange[0],
-        max: yRange[1],
+      scales: {
+        x: {
+          type: 'linear' as const,
+          title: { display: false },
+          ticks: { maxTicksLimit: 8, font: { size: 10 } },
+          min: zoomStateRef.current.min,
+          max: Math.min(zoomStateRef.current.max, totalDataRange.max),
+          grace: 0,
+          bounds: 'data' as const,
+          offset: false,
+          grid: {
+            offset: false
+          }
+        },
+        y: {
+          title: { display: false },
+          ticks: { font: { size: 10 } },
+          min: yRange[0],
+          max: yRange[1],
+        },
       },
-    },
-    elements: {
-      line: { tension: 0.2 },
-    },
-  })}, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile]);
+      elements: {
+        line: { tension: 0.2 },
+      },
+    })
+  }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max]);
 
   // Auto-reset zoom when new pitch data is loaded
   useEffect(() => {

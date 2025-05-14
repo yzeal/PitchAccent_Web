@@ -438,6 +438,29 @@ const App: React.FC = () => {
     }, 100); // 100ms debounce
   }, []);
 
+  // Add state for media duration
+  const [nativeMediaDuration, setNativeMediaDuration] = useState<number>(0);
+
+  // Update duration when media is loaded
+  React.useEffect(() => {
+    const media = getActiveMediaElement();
+    if (!media) return;
+    
+    const onLoadedMetadata = () => {
+      setNativeMediaDuration(media.duration);
+    };
+    
+    media.addEventListener('loadedmetadata', onLoadedMetadata);
+    // Set initial duration if already loaded
+    if (media.duration) {
+      setNativeMediaDuration(media.duration);
+    }
+    
+    return () => {
+      media.removeEventListener('loadedmetadata', onLoadedMetadata);
+    };
+  }, [nativeMediaUrl, nativeMediaType]);
+
   return (
     <div 
       className="app-container"
@@ -629,6 +652,7 @@ const App: React.FC = () => {
               }}
               onViewChange={handleViewChange}
               showNavigationHints={true}
+              totalDuration={nativeMediaDuration}
             />
           </section>
 
@@ -641,6 +665,7 @@ const App: React.FC = () => {
               color="#1976d2"
               playbackTime={userPlaybackTime}
               showNavigationHints={false}
+              totalDuration={userPitchData.times.length > 0 ? userPitchData.times[userPitchData.times.length - 1] : 0}
             />
             <Recorder
               onRecordingComplete={(_, blob: Blob) => setAudioBlob(blob)}

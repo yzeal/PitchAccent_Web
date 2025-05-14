@@ -1,4 +1,5 @@
 import { Chart } from 'chart.js';
+import type { ChartTypeRegistry, Point, BubbleDataPoint } from 'chart.js';
 
 export type Edge = 'start' | 'end' | null;
 
@@ -12,6 +13,16 @@ interface DragState {
   isDragFromMargin: boolean;
 }
 
+export interface DragControllerOptions {
+  chart: Chart<keyof ChartTypeRegistry, (number | [number, number] | Point | BubbleDataPoint | null)[], unknown> | null;
+  onLoopChange: ((start: number, end: number) => void) | null;
+  loopStart: number;
+  loopEnd: number;
+  edgeThresholdPixels?: number;
+  marginThresholdPixels?: number;
+  maxDragLimit?: number;
+}
+
 export class DragController {
   private dragState: DragState = {
     isDragging: false,
@@ -23,51 +34,40 @@ export class DragController {
     isDragFromMargin: false
   };
 
-  private chart: Chart | null = null;
-  private onLoopChange: ((start: number, end: number) => void) | null = null;
-  private loopStart: number = 0;
-  private loopEnd: number = 0;
-  private edgeThresholdPixels: number = 20;
-  private marginThresholdPixels: number = 40;
+  private chart: Chart<keyof ChartTypeRegistry, (number | [number, number] | Point | BubbleDataPoint | null)[], unknown> | null;
+  private onLoopChange: ((start: number, end: number) => void) | null;
+  private loopStart: number;
+  private loopEnd: number;
+  private edgeThresholdPixels: number;
+  private marginThresholdPixels: number;
+  private maxDragLimit: number;
 
-  constructor(options: {
-    chart: Chart | null;
-    onLoopChange: ((start: number, end: number) => void) | null;
-    loopStart: number;
-    loopEnd: number;
-    edgeThresholdPixels?: number;
-    marginThresholdPixels?: number;
-  }) {
+  constructor(options: DragControllerOptions) {
     this.chart = options.chart;
     this.onLoopChange = options.onLoopChange;
     this.loopStart = options.loopStart;
     this.loopEnd = options.loopEnd;
-    if (options.edgeThresholdPixels !== undefined) {
-      this.edgeThresholdPixels = options.edgeThresholdPixels;
-    }
-    if (options.marginThresholdPixels !== undefined) {
-      this.marginThresholdPixels = options.marginThresholdPixels;
-    }
+    this.edgeThresholdPixels = options.edgeThresholdPixels || 10;
+    this.marginThresholdPixels = options.marginThresholdPixels || 0;
+    this.maxDragLimit = options.maxDragLimit || Infinity;
     this.dragState.visualStart = this.loopStart;
     this.dragState.visualEnd = this.loopEnd;
   }
 
-  public updateValues(values: {
-    chart?: Chart | null;
-    onLoopChange?: ((start: number, end: number) => void) | null;
-    loopStart?: number;
-    loopEnd?: number;
-  }) {
-    if (values.chart !== undefined) this.chart = values.chart;
-    if (values.onLoopChange !== undefined) this.onLoopChange = values.onLoopChange;
-    if (values.loopStart !== undefined && !this.dragState.isDragging) {
-      this.loopStart = values.loopStart;
-      this.dragState.visualStart = values.loopStart;
+  public updateValues(options: Partial<DragControllerOptions>) {
+    if (options.chart !== undefined) this.chart = options.chart;
+    if (options.onLoopChange !== undefined) this.onLoopChange = options.onLoopChange;
+    if (options.loopStart !== undefined && !this.dragState.isDragging) {
+      this.loopStart = options.loopStart;
+      this.dragState.visualStart = options.loopStart;
     }
-    if (values.loopEnd !== undefined && !this.dragState.isDragging) {
-      this.loopEnd = values.loopEnd;
-      this.dragState.visualEnd = values.loopEnd;
+    if (options.loopEnd !== undefined && !this.dragState.isDragging) {
+      this.loopEnd = options.loopEnd;
+      this.dragState.visualEnd = options.loopEnd;
     }
+    if (options.edgeThresholdPixels !== undefined) this.edgeThresholdPixels = options.edgeThresholdPixels;
+    if (options.marginThresholdPixels !== undefined) this.marginThresholdPixels = options.marginThresholdPixels;
+    if (options.maxDragLimit !== undefined) this.maxDragLimit = options.maxDragLimit;
   }
 
   public isDragging(): boolean {
@@ -206,8 +206,8 @@ export class DragController {
     const coords = this.getChartCoordinates(event);
     if (!coords) return;
 
-    const minX = this.chart.scales.x.min ?? 0;
-    const maxX = this.chart.scales.x.max ?? 5;
+    const minX = 0;
+    const maxX = Math.min(this.maxDragLimit, this.chart.scales.x.max ?? 5);
     const newX = Math.max(minX, Math.min(maxX, coords.x));
 
     this.dragState.currentValue = newX;
