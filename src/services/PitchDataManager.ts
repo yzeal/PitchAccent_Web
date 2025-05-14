@@ -277,6 +277,11 @@ export class PitchDataManager {
     return { times, pitches };
   }
 
+  // Add method to get total duration
+  getTotalDuration(): number {
+    return this.totalDuration;
+  }
+
   // Add method to check if we're in progressive mode
   isInProgressiveMode(): boolean {
     return this.isProgressiveMode;

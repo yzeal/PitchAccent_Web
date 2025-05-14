@@ -447,13 +447,21 @@ const App: React.FC = () => {
     if (!media) return;
     
     const onLoadedMetadata = () => {
-      setNativeMediaDuration(media.duration);
+      // Use PitchDataManager's duration if available, otherwise fallback to media duration
+      const duration = pitchManager.current.getTotalDuration() || media.duration;
+      setNativeMediaDuration(duration);
+      console.log('[App] Setting media duration:', {
+        pitchManagerDuration: pitchManager.current.getTotalDuration(),
+        mediaDuration: media.duration,
+        finalDuration: duration
+      });
     };
     
     media.addEventListener('loadedmetadata', onLoadedMetadata);
     // Set initial duration if already loaded
     if (media.duration) {
-      setNativeMediaDuration(media.duration);
+      const duration = pitchManager.current.getTotalDuration() || media.duration;
+      setNativeMediaDuration(duration);
     }
     
     return () => {

@@ -220,12 +220,14 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
 
   // Update the useEffect that handles totalDataRange updates
   useEffect(() => {
-    const newMax = totalDuration || (times.length > 0 ? times[times.length - 1] : 1);
+    // Use totalDuration as the source of truth if available
+    const newMax = totalDuration || 1;
     console.log('[PitchGraph] Updating total data range:', {
         oldRange: totalDataRange,
         newMax,
         dataPoints: times.length,
         totalDuration,
+        lastTimePoint: times.length > 0 ? times[times.length - 1] : null,
         isUserInteracting: isUserInteractingRef.current,
         currentZoomState: { ...zoomStateRef.current }
     });
@@ -251,7 +253,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         }
         chartRef.current.update('none');
     }
-  }, [times, totalDuration]);
+  }, [totalDuration]); // Only depend on totalDuration since it's our source of truth
 
   // Remove the old initialization effect since we handle it in the data range update
   useEffect(() => {
@@ -980,7 +982,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     if (!chartRef.current) return;
     
     const chart = chartRef.current;
-    const newMax = Math.max(2, times[times.length - 1]);
+    const newMax = totalDuration || 1;
     
     // Update zoom state ref and view range
     const newRange = { min: 0, max: newMax };
@@ -989,8 +991,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     
     // Update chart scales and options
     if (chart.options.scales?.x) {
-      chart.options.scales.x.min = 0;
-      chart.options.scales.x.max = newMax;
+        chart.options.scales.x.min = 0;
+        chart.options.scales.x.max = newMax;
     }
     
     // Update actual scales
