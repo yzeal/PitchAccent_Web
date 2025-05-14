@@ -834,17 +834,77 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         borderRadius: 8,
         padding: 8,
         marginBottom: 24,
+        position: 'relative',
       }}
     >
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        marginBottom: 8,
+        fontSize: '0.8rem',
+        color: '#666',
+      }}>
+        <div style={{ display: 'flex', gap: 16 }}>
+          <span>🖱️ Mouse wheel to zoom</span>
+          <span>👆 Drag to pan</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button
+            onClick={handleResetZoom}
+            title="Reset Zoom"
+            style={{
+              padding: '2px 6px',
+              borderRadius: '50%',
+              border: 'none',
+              background: 'transparent',
+              color: '#1976d2',
+              fontSize: '1.1rem',
+              cursor: 'pointer',
+              minWidth: 0,
+              minHeight: 0,
+              lineHeight: 1,
+            }}
+          >
+            ↺
+          </button>
+        </div>
+      </div>
+
       <div
         style={{
           height: 150,
           width: '100%',
           maxWidth: '100%',
           paddingRight: '0px',
+          position: 'relative',
         }}
         className="pitch-graph-container"
       >
+        {zoomStateRef.current.max < xMax && (
+          <div style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 30,
+            background: 'linear-gradient(90deg, transparent, rgba(25, 118, 210, 0.1))',
+            pointerEvents: 'none',
+            zIndex: 1,
+          }} />
+        )}
+        {zoomStateRef.current.min > 0 && (
+          <div style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 30,
+            background: 'linear-gradient(-90deg, transparent, rgba(25, 118, 210, 0.1))',
+            pointerEvents: 'none',
+            zIndex: 1,
+          }} />
+        )}
+        
         <Line ref={chartRef} data={chartData} options={{
           ...options,
           layout: {
@@ -854,26 +914,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           }
         }} plugins={[loopOverlayPlugin, playbackIndicatorPlugin, marginIndicatorPlugin]} />
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
-        <button
-          onClick={handleResetZoom}
-          title="Reset Zoom"
-          style={{
-            padding: '2px 6px',
-            borderRadius: '50%',
-            border: 'none',
-            background: 'transparent',
-            color: '#1976d2',
-            fontSize: '1.1rem',
-            cursor: 'pointer',
-            minWidth: 0,
-            minHeight: 0,
-            lineHeight: 1,
-          }}
-        >
-          ↺
-        </button>
-      </div>
+
       <style>{`
         .pitch-graph-container {
           touch-action: manipulation;
