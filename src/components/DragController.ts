@@ -260,11 +260,8 @@ export class DragController {
     event.preventDefault();
     event.stopPropagation();
 
-    // Only trigger onLoopChange if we actually changed something and have a valid callback
-    if (this.onLoopChange && 
-        (Math.abs(this.dragState.visualStart - this.loopStart) > 0.001 || 
-         Math.abs(this.dragState.visualEnd - this.loopEnd) > 0.001)) {
-      
+    // Always trigger onLoopChange when dragging ends to ensure values are properly set
+    if (this.onLoopChange) {
       // Update internal state first
       this.loopStart = this.dragState.visualStart;
       this.loopEnd = this.dragState.visualEnd;

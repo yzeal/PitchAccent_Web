@@ -311,15 +311,31 @@ const App: React.FC = () => {
           } else if (!isInitialLoad) {
             // Only load new segments if this is not the initial setup
             await pitchManager.current.loadSegmentsForTimeRange(startTime, endTime);
+            
+            // Get data for the current view
             const visibleData = pitchManager.current.getPitchDataForTimeRange(startTime, endTime);
+            
+            // Save current loop boundaries before updating data
+            const currentLoopStart = loopStart;
+            const currentLoopEnd = loopEnd;
+            
+            // Update pitch data
             setNativePitchData(visibleData);
+            
+            // Make sure loop region stays consistent during data loading
+            // This prevents loop region from being reset to view bounds
+            if (currentLoopStart !== 0 || currentLoopEnd !== endTime) {
+              // Only update if values are different from view bounds
+              setLoopStart(currentLoopStart);
+              setLoopEnd(currentLoopEnd);
+            }
           }
         }
       } catch (error) {
         console.error('Error loading pitch data for time range:', error);
       }
     }, 100); // 100ms debounce
-  }, [nativePitchData.times]);
+  }, [nativePitchData.times, loopStart, loopEnd]);
 
   // Consolidate initial view setup into a single effect
   React.useEffect(() => {
@@ -365,6 +381,12 @@ const App: React.FC = () => {
 
   function fitYAxisToLoop() {
     if (!nativePitchData.times.length) return;
+
+    // Make sure we're using the latest loop region boundaries
+    console.log('[App] Starting Y axis fitting with loop region:', {
+      loopStart,
+      loopEnd
+    });
 
     // Find all pitches within the loop region
     const pitchesInRange = [];
@@ -772,7 +794,6 @@ const App: React.FC = () => {
                   getActiveMediaElement()!.currentTime = start;
                 }
                 fitYAxisToLoop();
-                handleViewChange(start, end);
               }}
               onViewChange={handleViewChange}
               showNavigationHints={true}

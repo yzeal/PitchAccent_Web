@@ -1131,16 +1131,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const chart = chartRef.current;
     if (!chart?.options?.plugins) return;
 
-    console.log('Playback update:', {
-      playbackTime,
-      viewRange,
-      chartScales: {
-        min: chart.scales.x?.min,
-        max: chart.scales.x?.max
-      },
-      trigger: 'playback time change'
-    });
-    
     // Store playback time in ref
     playbackTimeRef.current = playbackTime ?? 0;
     
@@ -1150,6 +1140,12 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       chart.options.plugins.loopOverlay = {
         loopStart: visualValues.start,
         loopEnd: visualValues.end
+      };
+    } else if (loopStart !== undefined && loopEnd !== undefined) {
+      // Make sure loop overlay always has the correct values
+      chart.options.plugins.loopOverlay = {
+        loopStart: loopStart,
+        loopEnd: loopEnd
       };
     }
     
@@ -1165,7 +1161,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       // Force a redraw of just the playback indicator
       chart.draw();
     });
-  }, [playbackTime]);
+  }, [playbackTime, loopStart, loopEnd]);
 
   return (
     <div
