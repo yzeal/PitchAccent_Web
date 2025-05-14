@@ -21,6 +21,7 @@ export interface DragControllerOptions {
   edgeThresholdPixels?: number;
   marginThresholdPixels?: number;
   maxDragLimit?: number;
+  onDragStart?: () => void;
 }
 
 export class DragController {
@@ -41,6 +42,7 @@ export class DragController {
   private edgeThresholdPixels: number;
   private marginThresholdPixels: number;
   private maxDragLimit: number;
+  private onDragStart?: () => void;
 
   constructor(options: DragControllerOptions) {
     this.chart = options.chart;
@@ -48,10 +50,11 @@ export class DragController {
     this.loopStart = options.loopStart;
     this.loopEnd = options.loopEnd;
     this.edgeThresholdPixels = options.edgeThresholdPixels || 10;
-    this.marginThresholdPixels = options.marginThresholdPixels || 0;
+    this.marginThresholdPixels = options.marginThresholdPixels || 40;
     this.maxDragLimit = options.maxDragLimit || Infinity;
     this.dragState.visualStart = this.loopStart;
     this.dragState.visualEnd = this.loopEnd;
+    this.onDragStart = options.onDragStart;
   }
 
   public updateValues(options: Partial<DragControllerOptions>) {
@@ -68,6 +71,7 @@ export class DragController {
     if (options.edgeThresholdPixels !== undefined) this.edgeThresholdPixels = options.edgeThresholdPixels;
     if (options.marginThresholdPixels !== undefined) this.marginThresholdPixels = options.marginThresholdPixels;
     if (options.maxDragLimit !== undefined) this.maxDragLimit = options.maxDragLimit;
+    if (options.onDragStart !== undefined) this.onDragStart = options.onDragStart;
   }
 
   public isDragging(): boolean {
@@ -126,14 +130,17 @@ export class DragController {
   private getNearestEdge(x: number): Edge {
     if (!this.chart?.scales?.x) return null;
 
-    const pixelsPerUnit = this.chart.scales.x.width / (this.chart.scales.x.max - this.chart.scales.x.min);
-    const threshold = this.edgeThresholdPixels / pixelsPerUnit;
+    const xScale = this.chart.scales.x;
+    const startPixel = xScale.getPixelForValue(this.dragState.visualStart);
+    const endPixel = xScale.getPixelForValue(this.dragState.visualEnd);
+    const xPixel = xScale.getPixelForValue(x);
 
-    const distanceToStart = Math.abs(x - this.dragState.visualStart);
-    const distanceToEnd = Math.abs(x - this.dragState.visualEnd);
+    // Calculate distances in pixels
+    const distanceToStart = Math.abs(xPixel - startPixel);
+    const distanceToEnd = Math.abs(xPixel - endPixel);
 
-    if (distanceToStart <= threshold && distanceToStart <= distanceToEnd) return 'start';
-    if (distanceToEnd <= threshold) return 'end';
+    if (distanceToStart <= this.edgeThresholdPixels && distanceToStart <= distanceToEnd) return 'start';
+    if (distanceToEnd <= this.edgeThresholdPixels) return 'end';
     return null;
   }
 
@@ -194,6 +201,11 @@ export class DragController {
       isDragFromMargin
     };
 
+    // Call onDragStart callback if provided
+    if (this.onDragStart) {
+      this.onDragStart();
+    }
+
     return true;
   };
 
@@ -208,24 +220,38 @@ export class DragController {
 
     const minX = 0;
     const maxX = Math.min(this.maxDragLimit, this.chart.scales.x.max ?? 5);
-    const newX = Math.max(minX, Math.min(maxX, coords.x));
+    let newX = Math.max(minX, Math.min(maxX, coords.x));
 
-    this.dragState.currentValue = newX;
-    if (this.dragState.edge === 'start' && newX < this.dragState.visualEnd) {
-      this.dragState.visualStart = newX;
-    } else if (this.dragState.edge === 'end' && newX > this.dragState.visualStart) {
-      this.dragState.visualEnd = newX;
+    // Add minimum gap between edges (0.1 seconds)
+    const MIN_GAP = 0.1;
+    if (this.dragState.edge === 'start') {
+      newX = Math.min(newX, this.dragState.visualEnd - MIN_GAP);
+    } else if (this.dragState.edge === 'end') {
+      newX = Math.max(newX, this.dragState.visualStart + MIN_GAP);
     }
 
-    this.chart.options.plugins.loopOverlay = {
-      loopStart: this.dragState.visualStart,
-      loopEnd: this.dragState.visualEnd
-    };
+    // Only update if the value has changed significantly
+    if (Math.abs(newX - (this.dragState.currentValue ?? 0)) > 0.001) {
+      this.dragState.currentValue = newX;
+      
+      // Update visual values based on the edge being dragged
+      if (this.dragState.edge === 'start') {
+        this.dragState.visualStart = newX;
+      } else if (this.dragState.edge === 'end') {
+        this.dragState.visualEnd = newX;
+      }
 
-    requestAnimationFrame(() => {
-      if (!this.chart?.ctx) return;
-      this.chart.draw();
-    });
+      // Update chart options
+      if (this.chart.options.plugins.loopOverlay) {
+        this.chart.options.plugins.loopOverlay = {
+          loopStart: this.dragState.visualStart,
+          loopEnd: this.dragState.visualEnd
+        };
+      }
+
+      // Force immediate redraw
+      this.chart.update('none');
+    }
   };
 
   public handleMouseUp = (event: MouseEvent | TouchEvent): void => {
@@ -234,15 +260,20 @@ export class DragController {
     event.preventDefault();
     event.stopPropagation();
 
-    if (this.dragState.currentValue !== null && this.onLoopChange) {
-      const newStart = this.dragState.edge === 'start' ? this.dragState.visualStart : this.loopStart;
-      const newEnd = this.dragState.edge === 'end' ? this.dragState.visualEnd : this.loopEnd;
-
-      if (newStart !== this.loopStart || newEnd !== this.loopEnd) {
-        this.onLoopChange(newStart, newEnd);
-      }
+    // Only trigger onLoopChange if we actually changed something and have a valid callback
+    if (this.onLoopChange && 
+        (Math.abs(this.dragState.visualStart - this.loopStart) > 0.001 || 
+         Math.abs(this.dragState.visualEnd - this.loopEnd) > 0.001)) {
+      
+      // Update internal state first
+      this.loopStart = this.dragState.visualStart;
+      this.loopEnd = this.dragState.visualEnd;
+      
+      // Then notify parent
+      this.onLoopChange(this.dragState.visualStart, this.dragState.visualEnd);
     }
 
+    // Reset drag state while preserving visual values
     const { visualStart, visualEnd } = this.dragState;
     this.dragState = {
       isDragging: false,

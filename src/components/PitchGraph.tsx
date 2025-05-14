@@ -154,16 +154,116 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     console.log('[PitchGraph] Device type:', isMobile ? 'mobile' : 'desktop');
   }, [isMobile]);
 
+  // Add a ref to track the last loop values to prevent unnecessary updates
+  const lastLoopValuesRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+
+  // Memoize options without zoom plugin
+  const options = useMemo(() => {
+    // Store current loop values
+    lastLoopValuesRef.current = {
+      start: loopStart ?? 0,
+      end: loopEnd ?? 0
+    };
+
+    return ({
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: {
+        duration: 0
+      },
+      plugins: {
+        legend: { display: false },
+        title: { display: false },
+        tooltip: { 
+          enabled: !isMobile,
+        },
+        loopOverlay: { 
+          loopStart: Math.min(loopStart || 0, totalDataRange.max), 
+          loopEnd: Math.min(loopEnd || 0, totalDataRange.max) 
+        },
+        playbackIndicator: { playbackTime: 0 },
+        marginIndicator: {
+          showLeftMargin,
+          showRightMargin
+        },
+      },
+      scales: {
+        x: {
+          type: 'linear' as const,
+          title: { display: false },
+          ticks: { maxTicksLimit: 8, font: { size: 10 } },
+          min: zoomStateRef.current.min,
+          max: Math.min(zoomStateRef.current.max, totalDataRange.max),
+          grace: 0,
+          bounds: 'data' as const,
+          offset: false,
+          grid: {
+            offset: false
+          }
+        },
+        y: {
+          title: { display: false },
+          ticks: { font: { size: 10 } },
+          min: yRange[0],
+          max: yRange[1],
+        },
+      },
+      elements: {
+        line: { tension: 0.2 },
+      },
+    });
+  }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max]);
+
+  // Add effect to ensure loop region is properly reflected in chart options
+  useEffect(() => {
+    if (chartRef.current?.options.plugins?.loopOverlay) {
+      const currentLoopStart = chartRef.current.options.plugins.loopOverlay.loopStart ?? 0;
+      const currentLoopEnd = chartRef.current.options.plugins.loopOverlay.loopEnd ?? 0;
+      
+      // Only update if values have changed significantly
+      if (Math.abs(currentLoopStart - (loopStart ?? 0)) > 0.001 || 
+          Math.abs(currentLoopEnd - (loopEnd ?? 0)) > 0.001) {
+        chartRef.current.options.plugins.loopOverlay = {
+          loopStart: loopStart ?? 0,
+          loopEnd: loopEnd ?? 0
+        };
+        chartRef.current.update('none');
+      }
+    }
+  }, [loopStart, loopEnd]);
+
   // Initialize drag controller when chart is ready
   useEffect(() => {
     if (chartRef.current && onLoopChange) {
       dragControllerRef.current = new DragController({
         chart: chartRef.current,
-        onLoopChange,
+        onLoopChange: (start, end) => {
+          // Debounce the loop change callback
+          if (onLoopChange && 
+              (Math.abs(start - (loopStart ?? 0)) > 0.001 || 
+               Math.abs(end - (loopEnd ?? 0)) > 0.001)) {
+            // Update chart immediately for visual feedback
+            if (chartRef.current?.options.plugins?.loopOverlay) {
+              chartRef.current.options.plugins.loopOverlay = {
+                loopStart: start,
+                loopEnd: end
+              };
+              chartRef.current.update('none');
+            }
+            // Notify parent
+            onLoopChange(start, end);
+          }
+        },
         loopStart: loopStart ?? 0,
         loopEnd: loopEnd ?? 0,
-        marginThresholdPixels: 40, // Add margin threshold for edge dragging from outside visible area
-        maxDragLimit: totalDuration || totalDataRange.max // Add maximum drag limit
+        marginThresholdPixels: 40,
+        maxDragLimit: totalDuration || totalDataRange.max,
+        onDragStart: () => {
+          // Disable pan/zoom while dragging
+          isPanningRef.current = false;
+          isZoomingRef.current = false;
+          lastMouseXRef.current = null;
+        }
       });
     }
   }, [chartRef.current]);
@@ -173,10 +273,32 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     if (dragControllerRef.current) {
       dragControllerRef.current.updateValues({
         chart: chartRef.current,
-        onLoopChange,
+        onLoopChange: (start, end) => {
+          // Debounce the loop change callback
+          if (onLoopChange && 
+              (Math.abs(start - (loopStart ?? 0)) > 0.001 || 
+               Math.abs(end - (loopEnd ?? 0)) > 0.001)) {
+            // Update chart immediately for visual feedback
+            if (chartRef.current?.options.plugins?.loopOverlay) {
+              chartRef.current.options.plugins.loopOverlay = {
+                loopStart: start,
+                loopEnd: end
+              };
+              chartRef.current.update('none');
+            }
+            // Notify parent
+            onLoopChange(start, end);
+          }
+        },
         loopStart: loopStart ?? 0,
         loopEnd: loopEnd ?? 0,
-        maxDragLimit: totalDuration || totalDataRange.max // Update maximum drag limit
+        maxDragLimit: totalDuration || totalDataRange.max,
+        onDragStart: () => {
+          // Disable pan/zoom while dragging
+          isPanningRef.current = false;
+          isZoomingRef.current = false;
+          lastMouseXRef.current = null;
+        }
       });
     }
   }, [chartRef.current, onLoopChange, loopStart, loopEnd, totalDuration, totalDataRange.max]);
@@ -356,6 +478,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       newMax = maxViewRange;
     }
 
+    // Store current loop region values
+    const currentLoopStart = chart.options.plugins?.loopOverlay?.loopStart ?? 0;
+    const currentLoopEnd = chart.options.plugins?.loopOverlay?.loopEnd ?? 0;
+
     // Update zoom state
     zoomStateRef.current = { min: newMin, max: newMax };
     
@@ -364,6 +490,15 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       chart.options.scales.x.min = newMin;
       chart.options.scales.x.max = newMax;
     }
+    
+    // Restore loop region
+    if (chart.options.plugins?.loopOverlay) {
+      chart.options.plugins.loopOverlay = {
+        loopStart: currentLoopStart,
+        loopEnd: currentLoopEnd
+      };
+    }
+    
     chart.update('none');
     
     // Notify parent of view change
@@ -376,10 +511,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }, 100);
   };
 
-  // Modify handleMouseMove for panning to update viewRange
+  // Modify handleMouseMove for panning
   const handleMouseMove = (e: MouseEvent) => {
     const chart = chartRef.current;
-    if (!chart || !lastMouseXRef.current || !isPanningRef.current) return;
+    if (!chart || !lastMouseXRef.current || !isPanningRef.current || dragControllerRef.current?.isDragging()) return;
 
     const { min: currentMin, max: currentMax } = zoomStateRef.current;
     const currentRange = currentMax - currentMin;
@@ -417,6 +552,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         }
         return;
     }
+
+    // Store current loop region values
+    const currentLoopStart = chart.options.plugins?.loopOverlay?.loopStart ?? 0;
+    const currentLoopEnd = chart.options.plugins?.loopOverlay?.loopEnd ?? 0;
 
     const mouseX = e.offsetX;
     const dx = mouseX - lastMouseXRef.current;
@@ -459,11 +598,20 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         setViewRange({ min: newMin, max: newMax });
         lastMouseXRef.current = mouseX;
 
-        // Update chart
+        // Update chart scales
         if (chart.options.scales?.x) {
             chart.options.scales.x.min = newMin;
             chart.options.scales.x.max = newMax;
         }
+        
+        // Restore loop region
+        if (chart.options.plugins?.loopOverlay) {
+            chart.options.plugins.loopOverlay = {
+                loopStart: currentLoopStart,
+                loopEnd: currentLoopEnd
+            };
+        }
+        
         chart.update('none');
 
         // Notify parent of view change
@@ -873,57 +1021,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       ctx.restore();
     }
   };
-
-  // Memoize options without zoom plugin
-  const options = useMemo(() => {
-    return ({
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: {
-        duration: 0
-      },
-      plugins: {
-        legend: { display: false },
-        title: { display: false },
-        tooltip: { 
-          enabled: !isMobile,
-        },
-        loopOverlay: { 
-          loopStart: Math.min(loopStart || 0, totalDataRange.max), 
-          loopEnd: Math.min(loopEnd || 0, totalDataRange.max) 
-        },
-        playbackIndicator: { playbackTime: 0 },
-        marginIndicator: {
-          showLeftMargin,
-          showRightMargin
-        },
-      },
-      scales: {
-        x: {
-          type: 'linear' as const,
-          title: { display: false },
-          ticks: { maxTicksLimit: 8, font: { size: 10 } },
-          min: zoomStateRef.current.min,
-          max: Math.min(zoomStateRef.current.max, totalDataRange.max),
-          grace: 0,
-          bounds: 'data' as const,
-          offset: false,
-          grid: {
-            offset: false
-          }
-        },
-        y: {
-          title: { display: false },
-          ticks: { font: { size: 10 } },
-          min: yRange[0],
-          max: yRange[1],
-        },
-      },
-      elements: {
-        line: { tension: 0.2 },
-      },
-    })
-  }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max]);
 
   // Add ref to track if we've done initial setup
   const hasInitializedRef = useRef(false);
