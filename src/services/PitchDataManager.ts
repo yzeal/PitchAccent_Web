@@ -136,15 +136,51 @@ export class PitchDataManager {
     const pitches: (number | null)[] = [];
     const times: number[] = [];
 
-    for (let i = 0; i + frameSize < channelData.length; i += hopSize) {
-      const frame = channelData.slice(i, i + frameSize);
-      const [pitch, clarity] = detector.findPitch(frame, sampleRate);
-      if (pitch >= MIN_PITCH && pitch <= MAX_PITCH && clarity >= MIN_CLARITY) {
-        pitches.push(pitch);
-      } else {
+    // Process all frames, including the last one
+    for (let i = 0; i <= channelData.length - 1; i += hopSize) {
+      try {
+        let frame: Float32Array;
+        
+        // Check if we need to pad the frame
+        if (i + frameSize > channelData.length) {
+          // We're at the end, create a padded frame
+          const remainingSamples = channelData.length - i;
+          frame = new Float32Array(frameSize);
+          
+          // Copy the remaining samples
+          frame.set(channelData.slice(i, channelData.length));
+          
+          // Pad with zeros (or last value if we want to avoid discontinuities)
+          const lastValue = channelData[channelData.length - 1] || 0;
+          for (let j = remainingSamples; j < frameSize; j++) {
+            frame[j] = lastValue; // Alternatively, use 0 here
+          }
+          
+          console.log(`[PitchDataManager] Created padded frame at end of file: ${remainingSamples}/${frameSize} samples`);
+        } else {
+          // Regular frame, no padding needed
+          frame = channelData.slice(i, i + frameSize);
+        }
+        
+        const [pitch, clarity] = detector.findPitch(frame, sampleRate);
+        if (pitch >= MIN_PITCH && pitch <= MAX_PITCH && clarity >= MIN_CLARITY) {
+          pitches.push(pitch);
+        } else {
+          pitches.push(null);
+        }
+        times.push(i / sampleRate);
+        
+        // If we're processing a padded frame at the end, stop after this iteration
+        if (i + frameSize > channelData.length) {
+          break;
+        }
+      } catch (frameError: unknown) {
+        const errorMessage = frameError instanceof Error ? frameError.message : String(frameError);
+        console.warn(`[PitchDataManager] Error processing frame at position ${i}: ${errorMessage}`);
+        // Add a null pitch for this position to maintain time alignment
+        times.push(i / sampleRate);
         pitches.push(null);
       }
-      times.push(i / sampleRate);
     }
 
     const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
@@ -180,7 +216,23 @@ export class PitchDataManager {
     for (let i = startSegment; i <= endSegment + this.config.preloadSegments; i++) {
       if (this.segments.has(i) && !this.segments.get(i)!.isProcessed) {
         console.log(`[PitchDataManager] Processing segment ${i}`);
-        await this.processSegment(i);
+        try {
+          await this.processSegment(i);
+        } catch (error: unknown) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          console.error(`[PitchDataManager] Error loading segment ${i}:`, errorMessage);
+          
+          // Mark as processed with empty data to prevent repeated errors
+          const segment = this.segments.get(i);
+          if (segment) {
+            this.segments.set(i, {
+              ...segment,
+              times: [],
+              pitches: [],
+              isProcessed: true
+            });
+          }
+        }
       }
     }
 
@@ -197,46 +249,110 @@ export class PitchDataManager {
 
     console.log(`[PitchDataManager] Processing segment ${segmentIndex} (${segment.startTime}s to ${segment.endTime}s)`);
 
-    const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
-    const channelData = audioBuffer.getChannelData(0);
-    const sampleRate = audioBuffer.sampleRate;
-    
-    // Calculate sample indices for this segment
-    const startSample = Math.floor(segment.startTime * sampleRate);
-    const endSample = Math.floor(segment.endTime * sampleRate);
-    
-    console.log(`[PitchDataManager] Segment ${segmentIndex} samples: ${startSample} to ${endSample}`);
-    
-    const frameSize = 2048;
-    const hopSize = 256;
-    const detector = PitchDetector.forFloat32Array(frameSize);
-    const pitches: (number | null)[] = [];
-    const times: number[] = [];
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+      const channelData = audioBuffer.getChannelData(0);
+      const sampleRate = audioBuffer.sampleRate;
+      
+      // Calculate sample indices for this segment
+      const startSample = Math.floor(segment.startTime * sampleRate);
+      const endSample = Math.floor(segment.endTime * sampleRate);
+      
+      console.log(`[PitchDataManager] Segment ${segmentIndex} samples: ${startSample} to ${endSample}`);
+      
+      const frameSize = 2048;
+      const hopSize = 256;
+      const detector = PitchDetector.forFloat32Array(frameSize);
+      const pitches: (number | null)[] = [];
+      const times: number[] = [];
 
-    // Only process samples within this segment
-    for (let i = startSample; i + frameSize < endSample; i += hopSize) {
-      const frame = channelData.slice(i, i + frameSize);
-      const [pitch, clarity] = detector.findPitch(frame, sampleRate);
-      if (pitch >= MIN_PITCH && pitch <= MAX_PITCH && clarity >= MIN_CLARITY) {
-        pitches.push(pitch);
-      } else {
-        pitches.push(null);
+      // Process all samples in this segment, including handling the end correctly
+      for (let i = startSample; i < endSample; i += hopSize) {
+        try {
+          let frame: Float32Array;
+          
+          // Check if there are enough samples left in this segment for a full frame
+          if (i + frameSize > endSample) {
+            // If this is the last segment of the file and we're near the end
+            if (segmentIndex === this.segments.size - 1 && i + frameSize > channelData.length) {
+              // Create a padded frame for the end of the file
+              const remainingSamples = channelData.length - i;
+              frame = new Float32Array(frameSize);
+              
+              // Copy the remaining samples
+              frame.set(channelData.slice(i, channelData.length));
+              
+              // Pad with zeros or last value
+              const lastValue = channelData[channelData.length - 1] || 0;
+              for (let j = remainingSamples; j < frameSize; j++) {
+                frame[j] = lastValue;
+              }
+              
+              console.log(`[PitchDataManager] Created padded frame at end of segment ${segmentIndex}: ${remainingSamples}/${frameSize} samples`);
+            } else {
+              // For non-final segments or if we still have enough samples in the buffer,
+              // just read ahead into the next segment
+              frame = channelData.slice(i, i + frameSize);
+            }
+          } else {
+            // Regular frame, no special handling needed
+            frame = channelData.slice(i, i + frameSize);
+          }
+          
+          // Ensure we have a full frame
+          if (frame.length === frameSize) {
+            const [pitch, clarity] = detector.findPitch(frame, sampleRate);
+            if (pitch >= MIN_PITCH && pitch <= MAX_PITCH && clarity >= MIN_CLARITY) {
+              pitches.push(pitch);
+            } else {
+              pitches.push(null);
+            }
+            times.push(i / sampleRate);
+          } else {
+            console.warn(`[PitchDataManager] Skipping frame with unexpected length: ${frame.length}`);
+          }
+          
+          // If we're processing a frame that extends beyond this segment's endSample,
+          // or we've reached the end of the file, break after this iteration
+          if (i + hopSize >= endSample || 
+             (segmentIndex === this.segments.size - 1 && i + frameSize > channelData.length)) {
+            break;
+          }
+        } catch (frameError: unknown) {
+          const errorMessage = frameError instanceof Error ? frameError.message : String(frameError);
+          console.warn(`[PitchDataManager] Error processing frame at position ${i}: ${errorMessage}`);
+          // Add a null pitch for this position to maintain time alignment
+          if (i / sampleRate >= segment.startTime && i / sampleRate <= segment.endTime) {
+            times.push(i / sampleRate);
+            pitches.push(null);
+          }
+        }
       }
-      times.push(i / sampleRate);
-    }
 
-    const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
-    
-    console.log(`[PitchDataManager] Segment ${segmentIndex} processed: ${pitches.length} points`);
-    
-    // Update the segment with processed data
-    this.segments.set(segmentIndex, {
-      ...segment,
-      times,
-      pitches: smoothed,
-      isProcessed: true
-    });
+      const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+      
+      console.log(`[PitchDataManager] Segment ${segmentIndex} processed: ${pitches.length} points`);
+      
+      // Update the segment with processed data
+      this.segments.set(segmentIndex, {
+        ...segment,
+        times,
+        pitches: smoothed,
+        isProcessed: true
+      });
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[PitchDataManager] Error processing segment ${segmentIndex}:`, errorMessage);
+      
+      // Mark segment as processed but with empty data to prevent repeated errors
+      this.segments.set(segmentIndex, {
+        ...segment,
+        times: [],
+        pitches: [],
+        isProcessed: true
+      });
+    }
   }
 
   private cleanupOldSegments(currentSegment: number) {
