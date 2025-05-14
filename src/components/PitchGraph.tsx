@@ -22,13 +22,19 @@ interface LoopOverlayOptions {
   loopEnd?: number;
 }
 
-// Extend Chart.js types to include our plugins
+// Extend Chart.js types to include our plugins and custom properties
 declare module 'chart.js' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface PluginOptionsByType<TType extends keyof ChartTypeRegistry> {
     loopOverlay?: LoopOverlayOptions;
     playbackIndicator?: { playbackTime?: number };
     marginIndicator?: { showLeftMargin?: boolean; showRightMargin?: boolean };
+  }
+  
+  // Add custom properties we attach to the chart instance
+  interface Chart {
+    setViewRange?: (range: { min: number; max: number }) => void;
+    zoomStateRef?: React.RefObject<{ min: number; max: number }>;
   }
 }
 
@@ -318,11 +324,35 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [chartRef.current, onLoopChange, loopStart, loopEnd, totalDuration, totalDataRange.max]);
 
+  // Expose the setViewRange function on the chart instance
   useEffect(() => {
-    if (onChartReady) {
-      onChartReady(chartRef.current || null);
+    if (chartRef.current && onChartReady) {
+      // Only set up once to prevent multiple calls
+      if (!chartRef.current.setViewRange) {
+        console.log('[PitchGraph] Exposing functions on chart instance');
+        
+        // Expose our internal state setter on the chart instance
+        chartRef.current.setViewRange = (range: { min: number; max: number }) => {
+          console.log('[PitchGraph] External setViewRange called:', range);
+          zoomStateRef.current = range;
+          setViewRange(range);
+          
+          // Update chart if it exists
+          if (chartRef.current && chartRef.current.options.scales?.x) {
+            chartRef.current.options.scales.x.min = range.min;
+            chartRef.current.options.scales.x.max = range.max;
+            chartRef.current.update();
+          }
+        };
+        
+        // Expose our zoom state ref for direct access in emergencies
+        chartRef.current.zoomStateRef = zoomStateRef;
+        
+        // Notify parent the chart is ready
+        onChartReady(chartRef.current);
+      }
     }
-  }, [onChartReady, chartRef.current]);
+  }, [chartRef.current, onChartReady]);
 
   useEffect(() => {
     if (yFit && yFit.length === 2) {
@@ -442,7 +472,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [viewRange, onViewChange]);
 
-  // Handle wheel events for zooming
+  // Modify handleWheel for zooming to limit max view range to 20 seconds
   const handleWheel = (e: WheelEvent) => {
     const chart = chartRef.current;
     if (!chart || dragControllerRef.current?.isDragging()) return;
@@ -470,14 +500,21 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     
     // Calculate new range while keeping mouse position fixed
     const currentRange = currentMax - currentMin;
-    const newRange = currentRange * zoomFactor;
+    let newRange = currentRange * zoomFactor;
     
     // Enforce minimum (1s) and maximum view range
     const minViewRange = 1;
-    const maxViewRange = totalDuration || totalDataRange.max;
+    const maxViewRange = Math.min(20, totalDuration || totalDataRange.max); // Limit to 20 seconds or total duration
     
-    // Don't allow zooming out beyond video duration
-    if (newRange > maxViewRange) return;
+    // Don't allow zooming out beyond maximum view range
+    if (newRange > maxViewRange) {
+      // If already at max range, don't do anything
+      if (Math.abs(currentRange - maxViewRange) < 0.01) return;
+      
+      // Otherwise, limit to max range
+      newRange = maxViewRange;
+      console.log('[PitchGraph] Limiting zoom out to maximum view range:', maxViewRange);
+    }
     
     // Don't allow zooming in beyond minimum view range
     if (newRange < minViewRange) return;
@@ -494,9 +531,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       newMax += Math.abs(newMin);
       newMin = 0;
     }
-    if (newMax > maxViewRange) {
-      newMin = Math.max(0, newMin - (newMax - maxViewRange));
-      newMax = maxViewRange;
+    
+    const absoluteMaxRange = totalDuration || totalDataRange.max;
+    if (newMax > absoluteMaxRange) {
+      newMin = Math.max(0, newMin - (newMax - absoluteMaxRange));
+      newMax = absoluteMaxRange;
     }
 
     // Update zoom state

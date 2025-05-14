@@ -41,6 +41,12 @@ declare global {
   }
 }
 
+// Add extended chart type with our custom methods
+interface ExtendedChart extends Chart<'line', (number | null)[], number> {
+  setViewRange?: (range: { min: number; max: number }) => void;
+  zoomStateRef?: React.RefObject<{ min: number; max: number }>;
+}
+
 const App: React.FC = () => {
   // User pitch data
   const [userPitchData, setUserPitchData] = useState<{ times: number[]; pitches: (number | null)[] }>({ times: [], pitches: [] })
@@ -67,7 +73,7 @@ const App: React.FC = () => {
   const userAudioRef = useRef<HTMLAudioElement>(null);
   const userAudioPlayingRef = useRef(false);
 
-  const [nativeChartInstance, setNativeChartInstance] = useState<Chart<'line', (number | null)[], number> | null>(null);
+  const [nativeChartInstance, setNativeChartInstance] = useState<ExtendedChart | null>(null);
 
   // Add drag state
   const [isDragging, setIsDragging] = useState(false);
@@ -85,6 +91,9 @@ const App: React.FC = () => {
   
   // Add a ref to track when a new file is being loaded
   const isLoadingNewFileRef = useRef<boolean>(false);
+
+  // Add loading state for pitch data
+  const [isLoadingPitchData, setIsLoadingPitchData] = useState(false);
 
   // Add drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
@@ -376,7 +385,7 @@ const App: React.FC = () => {
   // Add ref to track initial setup
   const initialSetupDoneRef = useRef(false);
 
-  // Modify handleViewChange to check the loading flag
+  // Update handleViewChange to show loading indicator
   const handleViewChange = useCallback(async (startTime: number, endTime: number, preservedLoopStart?: number, preservedLoopEnd?: number) => {
     // Clear any pending timeout
     if (viewChangeTimeoutRef.current) {
@@ -422,6 +431,9 @@ const App: React.FC = () => {
     } else {
       console.log('[App] Skipping loop region preservation in handleViewChange - loading new file');
     }
+
+    // Set loading state
+    setIsLoadingPitchData(true);
 
     // Set new timeout for data loading (separated from loop region handling)
     viewChangeTimeoutRef.current = setTimeout(async () => {
@@ -509,6 +521,9 @@ const App: React.FC = () => {
         }
       } catch (error) {
         console.error('Error loading pitch data for time range:', error);
+      } finally {
+        // Clear loading state
+        setIsLoadingPitchData(false);
       }
     }, 100); // 100ms debounce
   }, [nativePitchData.times, loopStart, loopEnd]);
@@ -886,6 +901,55 @@ const App: React.FC = () => {
     }
   }, [nativePitchData]);
 
+  // Function to jump to current playback position
+  const jumpToPlaybackPosition = () => {
+    const media = getActiveMediaElement();
+    if (!media || !nativeChartInstance) return;
+
+    const currentTime = media.currentTime;
+    const viewDuration = 10; // Show 10 seconds around current position
+    
+    // Calculate new view window centered around current time
+    let startTime = Math.max(0, currentTime - viewDuration * 0.3); // Position current time at 30% of view
+    let endTime = startTime + viewDuration;
+    
+    // If we're near the end of the video, adjust the window
+    const totalDuration = pitchManager.current.getTotalDuration();
+    if (endTime > totalDuration) {
+      endTime = totalDuration;
+      startTime = Math.max(0, endTime - viewDuration);
+    }
+    
+    console.log('[App] Jumping to playback position:', {
+      currentTime,
+      newView: { startTime, endTime }
+    });
+    
+    // First, set loading state to indicate we're changing view
+    setIsLoadingPitchData(true);
+    
+    // Trigger data loading first
+    handleViewChange(startTime, endTime);
+    
+    // Wait a short time for data to load before updating the chart view
+    setTimeout(() => {
+      // Update chart view after data is loaded
+      if (nativeChartInstance && nativeChartInstance.setViewRange) {
+        console.log('[App] Updating chart view range to:', { min: startTime, max: endTime });
+        nativeChartInstance.setViewRange({ min: startTime, max: endTime });
+      } else if (nativeChartInstance && nativeChartInstance.options.scales?.x) {
+        // Fallback if setViewRange not available
+        console.log('[App] Fallback: Updating chart scales directly');
+        nativeChartInstance.options.scales.x.min = startTime;
+        nativeChartInstance.options.scales.x.max = endTime;
+        nativeChartInstance.update();
+      }
+      
+      // Clear loading state
+      setIsLoadingPitchData(false);
+    }, 500); // Increased timeout to ensure data is loaded
+  };
+
   return (
     <div 
       className="app-container"
@@ -1059,25 +1123,59 @@ const App: React.FC = () => {
                   >
                     Loop visible
                   </button>
+                  
+                  {/* Jump to playback position button - only for long videos */}
+                  {nativeMediaDuration > 30 && (
+                    <button
+                      style={{ fontSize: 12, padding: '2px 8px', marginLeft: 8 }}
+                      title="Jump to current playback position"
+                      disabled={!nativeChartInstance || !getActiveMediaElement()}
+                      onClick={jumpToPlaybackPosition}
+                    >
+                      Jump to playback
+                    </button>
+                  )}
                 </div>
               </div>
             )}
-            <PitchGraphWithControls
-              onChartReady={setNativeChartInstance}
-              times={nativePitchData.times}
-              pitches={nativePitchData.pitches}
-              label="Native Pitch (Hz)"
-              color="#388e3c"
-              loopStart={loopStart}
-              loopEnd={loopEnd}
-              yFit={loopYFit}
-              playbackTime={nativePlaybackTime}
-              onLoopChange={onLoopChangeHandler}
-              onViewChange={onViewChangeHandler}
-              showNavigationHints={true}
-              totalDuration={nativeMediaDuration}
-              initialViewDuration={nativeMediaDuration > 30 ? 10 : undefined}
-            />
+            
+            {/* Loading indicator */}
+            <div style={{ position: 'relative' }}>
+              {isLoadingPitchData && (
+                <div style={{
+                  position: 'absolute',
+                  top: 10,
+                  right: 10,
+                  zIndex: 10,
+                  background: 'rgba(25, 118, 210, 0.2)',
+                  padding: '4px 8px',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  color: '#1976d2',
+                  fontWeight: 'bold',
+                  pointerEvents: 'none',
+                }}>
+                  Loading...
+                </div>
+              )}
+              
+              <PitchGraphWithControls
+                onChartReady={setNativeChartInstance}
+                times={nativePitchData.times}
+                pitches={nativePitchData.pitches}
+                label="Native Pitch (Hz)"
+                color="#388e3c"
+                loopStart={loopStart}
+                loopEnd={loopEnd}
+                yFit={loopYFit}
+                playbackTime={nativePlaybackTime}
+                onLoopChange={onLoopChangeHandler}
+                onViewChange={onViewChangeHandler}
+                showNavigationHints={true}
+                totalDuration={nativeMediaDuration}
+                initialViewDuration={nativeMediaDuration > 30 ? 10 : undefined}
+              />
+            </div>
           </section>
 
           {/* User Recording Section */}
