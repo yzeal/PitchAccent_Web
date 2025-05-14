@@ -272,44 +272,10 @@ const App: React.FC = () => {
     fitYAxisToLoop();
   }, [nativePitchData.times, nativeChartInstance]);
 
-  // Add effect to handle initial data loading and view setup
-  React.useEffect(() => {
-    if (nativePitchData.times.length > 0) {
-      const duration = nativePitchData.times[nativePitchData.times.length - 1];
-      
-      // For long videos, ensure we're only loading the first segment initially
-      if (duration > 30) {
-        console.log('[App] Long video detected, loading initial segment:', {
-          duration,
-          initialSegment: '0-10s'
-        });
-        
-        // Force initial view to first 10 seconds
-        if (nativeChartInstance) {
-          const initialViewDuration = 10;
-          
-          // Update chart scales
-          if (nativeChartInstance.options.scales?.x) {
-            nativeChartInstance.options.scales.x.min = 0;
-            nativeChartInstance.options.scales.x.max = initialViewDuration;
-            
-            // Update zoom state ref
-            const chartWithZoomState = nativeChartInstance as unknown as { zoomStateRef: { current: { min: number; max: number } } };
-            if (chartWithZoomState.zoomStateRef) {
-              chartWithZoomState.zoomStateRef.current = { min: 0, max: initialViewDuration };
-            }
-            
-            // Force chart update
-            nativeChartInstance.update('none');
-          }
-        }
-        
-        handleViewChange(0, 10);
-      }
-    }
-  }, [nativePitchData.times, nativeChartInstance]);
+  // Add ref to track initial setup
+  const initialSetupDoneRef = useRef(false);
 
-  // Modify handleViewChange to maintain view state
+  // Modify handleViewChange to prevent repeated triggers
   const handleViewChange = useCallback(async (startTime: number, endTime: number) => {
     // Clear any pending timeout
     if (viewChangeTimeoutRef.current) {
@@ -321,9 +287,11 @@ const App: React.FC = () => {
       try {
         // Only load segments if we're in progressive mode
         if (pitchManager.current.isInProgressiveMode()) {
-          const isInitialLoad = nativePitchData.times.length === 0;
           const duration = pitchManager.current.getTotalDuration();
           const isLongVideo = duration > 30;
+          
+          // Only consider it an initial load if we haven't done setup and have no data
+          const isInitialLoad = !initialSetupDoneRef.current && nativePitchData.times.length === 0;
           
           console.log('[App] View change triggered:', { 
             startTime, 
@@ -339,21 +307,9 @@ const App: React.FC = () => {
             await pitchManager.current.loadSegmentsForTimeRange(0, 10);
             const visibleData = pitchManager.current.getPitchDataForTimeRange(0, 10);
             setNativePitchData(visibleData);
-            
-            // Ensure chart view is set to first 10 seconds
-            if (nativeChartInstance && nativeChartInstance.options.scales?.x) {
-              nativeChartInstance.options.scales.x.min = 0;
-              nativeChartInstance.options.scales.x.max = 10;
-              
-              // Update zoom state ref
-              const chartWithZoomState = nativeChartInstance as unknown as { zoomStateRef: { current: { min: number; max: number } } };
-              if (chartWithZoomState.zoomStateRef) {
-                chartWithZoomState.zoomStateRef.current = { min: 0, max: 10 };
-              }
-              
-              nativeChartInstance.update('none');
-            }
-          } else {
+            initialSetupDoneRef.current = true;
+          } else if (!isInitialLoad) {
+            // Only load new segments if this is not the initial setup
             await pitchManager.current.loadSegmentsForTimeRange(startTime, endTime);
             const visibleData = pitchManager.current.getPitchDataForTimeRange(startTime, endTime);
             setNativePitchData(visibleData);
@@ -363,18 +319,19 @@ const App: React.FC = () => {
         console.error('Error loading pitch data for time range:', error);
       }
     }, 100); // 100ms debounce
-  }, [nativeChartInstance]);
+  }, [nativePitchData.times]);
 
-  // Add effect to handle initial view range for long videos when chart becomes available
+  // Consolidate initial view setup into a single effect
   React.useEffect(() => {
-    if (nativeChartInstance && nativePitchData.times.length > 0) {
+    if (nativeChartInstance && nativePitchData.times.length > 0 && !initialSetupDoneRef.current) {
       const duration = nativePitchData.times[nativePitchData.times.length - 1];
       
       if (duration > 30) {
         const initialViewDuration = 10;
         console.log('[App] Setting initial view range for long video:', {
           duration,
-          initialViewDuration
+          initialViewDuration,
+          isInitialSetup: !initialSetupDoneRef.current
         });
         
         // Update zoom state ref directly
@@ -393,10 +350,11 @@ const App: React.FC = () => {
           
           // Notify parent of view change
           handleViewChange(0, initialViewDuration);
+          initialSetupDoneRef.current = true;
         }
       }
     }
-  }, [nativeChartInstance, handleViewChange]);
+  }, [nativeChartInstance, nativePitchData.times, handleViewChange]);
 
   // Add effect to update y-axis when loop region changes
   React.useEffect(() => {

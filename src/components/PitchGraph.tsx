@@ -925,9 +925,16 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     })
   }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max]);
 
-  // Auto-reset zoom when new pitch data is loaded
+  // Add ref to track if we've done initial setup
+  const hasInitializedRef = useRef(false);
+
+  // Modify auto-reset zoom to only trigger on initial load
   useEffect(() => {
-    handleResetZoom();
+    if (!hasInitializedRef.current && times.length > 0) {
+      console.log('[PitchGraph] Initial load detected, resetting zoom');
+      handleResetZoom();
+      hasInitializedRef.current = true;
+    }
   }, [times]);
 
   // Set up event listeners when canvas is ready
