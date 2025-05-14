@@ -215,21 +215,28 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [pitches, yFit]);
 
-  // Update total data range when new data arrives or total duration changes
+  // Add a ref to track the actual total range
+  const actualTotalRangeRef = useRef<number>(1);
+
+  // Update the useEffect that handles totalDataRange updates
   useEffect(() => {
     const newMax = totalDuration || (times.length > 0 ? times[times.length - 1] : 1);
     console.log('[PitchGraph] Updating total data range:', {
-      oldRange: totalDataRange,
-      newMax,
-      dataPoints: times.length,
-      totalDuration,
-      isUserInteracting: isUserInteractingRef.current
+        oldRange: totalDataRange,
+        newMax,
+        dataPoints: times.length,
+        totalDuration,
+        isUserInteracting: isUserInteractingRef.current,
+        currentZoomState: { ...zoomStateRef.current }
     });
+    
+    // Update the actual total range ref
+    actualTotalRangeRef.current = newMax;
     
     // Always reset zoom state when total duration changes
     const updatedRange = {
-      min: 0,
-      max: newMax
+        min: 0,
+        max: newMax
     };
     
     setTotalDataRange(updatedRange);
@@ -238,11 +245,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     
     // Update chart if it exists
     if (chartRef.current) {
-      if (chartRef.current.options.scales?.x) {
-        chartRef.current.options.scales.x.min = updatedRange.min;
-        chartRef.current.options.scales.x.max = updatedRange.max;
-      }
-      chartRef.current.update('none');
+        if (chartRef.current.options.scales?.x) {
+            chartRef.current.options.scales.x.min = updatedRange.min;
+            chartRef.current.options.scales.x.max = updatedRange.max;
+        }
+        chartRef.current.update('none');
     }
   }, [times, totalDuration]);
 
@@ -361,30 +368,124 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const chart = chartRef.current;
     if (!chart || !lastMouseXRef.current || !isPanningRef.current) return;
 
+    const { min: currentMin, max: currentMax } = zoomStateRef.current;
+    const currentRange = currentMax - currentMin;
+    const maxRange = actualTotalRangeRef.current;
+    
+    // Double check we're not somehow panning while fully zoomed out
+    // or have an invalid zoom state
+    if (currentRange >= maxRange || 
+        currentRange <= 0 || 
+        currentMin < 0 ||
+        currentMax > maxRange) {
+        console.log('[PitchGraph] Stopping pan - invalid state detected:', {
+            currentRange,
+            maxRange,
+            zoomState: { ...zoomStateRef.current },
+            totalRange: { ...totalDataRange },
+            actualTotalRange: actualTotalRangeRef.current,
+            isZoomedOut: currentRange >= maxRange
+        });
+        // Reset to safe state
+        isPanningRef.current = false;
+        lastMouseXRef.current = null;
+        
+        // If we're in an invalid state, reset the view
+        if (currentRange <= 0 || currentMin < 0 || currentMax > maxRange) {
+            const safeRange = { min: 0, max: maxRange };
+            zoomStateRef.current = safeRange;
+            setViewRange(safeRange);
+            if (chart.options.scales?.x) {
+                chart.options.scales.x.min = safeRange.min;
+                chart.options.scales.x.max = safeRange.max;
+            }
+            chart.update('none');
+            onViewChange?.(safeRange.min, safeRange.max);
+        }
+        return;
+    }
+
     const mouseX = e.offsetX;
     const dx = mouseX - lastMouseXRef.current;
     const xScale = chart.scales.x;
     const pixelsPerUnit = (chart.chartArea.right - chart.chartArea.left) / (xScale.max - xScale.min);
     const deltaX = dx / pixelsPerUnit;
+    
+    // Calculate new min/max positions
+    let newMin = currentMin - deltaX;
+    let newMax = currentMax - deltaX;
 
-    const { min: currentMin, max: currentMax } = zoomStateRef.current;
-    const newMin = Math.max(0, currentMin - deltaX);
-    const newMax = Math.min(xMax, currentMax - deltaX);
-
-    if (newMin !== currentMin || newMax !== currentMax) {
-      zoomStateRef.current = { min: newMin, max: newMax };
-      setViewRange({ min: newMin, max: newMax });
-      lastMouseXRef.current = mouseX;
+    // Prevent panning beyond bounds with improved precision
+    if (newMin < 0) {
+        // If trying to pan beyond left edge, lock to 0
+        newMin = 0;
+        newMax = currentRange;
+    } else if (newMax > maxRange) {
+        // If trying to pan beyond right edge, lock to max
+        newMax = maxRange;
+        newMin = Math.max(0, newMax - currentRange);
     }
 
-    // Update chart
-    chart.update('none');
+    // Additional validation of the new range before applying
+    const newRange = newMax - newMin;
+    if (newRange <= 0 || newMin < 0 || newMax > maxRange) {
+        console.log('[PitchGraph] Invalid new range calculated:', {
+            newMin,
+            newMax,
+            newRange,
+            maxRange,
+            currentRange,
+            actualTotalRange: actualTotalRangeRef.current
+        });
+        return;
+    }
+
+    // Only update if we actually moved and the new range is valid
+    if (newMin !== currentMin || newMax !== currentMax) {
+        zoomStateRef.current = { min: newMin, max: newMax };
+        setViewRange({ min: newMin, max: newMax });
+        lastMouseXRef.current = mouseX;
+
+        // Update chart
+        if (chart.options.scales?.x) {
+            chart.options.scales.x.min = newMin;
+            chart.options.scales.x.max = newMax;
+        }
+        chart.update('none');
+
+        // Notify parent of view change
+        onViewChange?.(newMin, newMax);
+    }
   };
 
   const handleMouseDown = (e: MouseEvent) => {
     if (e.button === 0 && !dragControllerRef.current?.isDragging()) { // Left click only
-      isPanningRef.current = true;
-      lastMouseXRef.current = e.offsetX;
+        // Check if we're fully zoomed out before allowing pan to start
+        const currentRange = zoomStateRef.current.max - zoomStateRef.current.min;
+        const maxRange = actualTotalRangeRef.current;
+        
+        console.log('[PitchGraph] Pan attempt:', {
+            currentRange,
+            maxRange,
+            zoomState: { ...zoomStateRef.current },
+            totalRange: { ...totalDataRange },
+            actualTotalRange: actualTotalRangeRef.current,
+            diff: Math.abs(currentRange - maxRange),
+            isZoomedOut: currentRange >= maxRange
+        });
+
+        // Only start panning if we're zoomed in (with some small tolerance for floating point comparison)
+        // and the current view range is valid
+        if (currentRange < maxRange && 
+            currentRange > 0 && 
+            zoomStateRef.current.min >= 0 &&
+            zoomStateRef.current.max <= maxRange) {
+            console.log('[PitchGraph] Starting pan');
+            isPanningRef.current = true;
+            lastMouseXRef.current = e.offsetX;
+        } else {
+            console.log('[PitchGraph] Pan prevented - fully zoomed out or invalid range');
+        }
     }
   };
 
@@ -461,7 +562,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       
       // Apply limits
       const finalMin = Math.max(0, newMin);
-      const finalMax = Math.min(xMax, Math.max(finalMin + 0.5, newMax));
+      const finalMax = Math.min(totalDataRange.max, Math.max(finalMin + 0.5, newMax));
       
       // Update zoom state
       zoomStateRef.current = { min: finalMin, max: finalMax };
@@ -494,26 +595,29 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const xScale = chart.scales.x;
       if (!xScale?.getValueForPixel) return;
       
-      const deltaValue0 = xScale.getValueForPixel(0);
-      const deltaValueDelta = xScale.getValueForPixel(deltaX);
-      if (deltaValue0 === undefined || deltaValueDelta === undefined) return;
+      const value0 = xScale.getValueForPixel(0);
+      const valueDx = xScale.getValueForPixel(deltaX);
+      if (value0 === undefined || valueDx === undefined) return;
       
-      const deltaData = deltaValueDelta - deltaValue0;
+      const deltaValue = valueDx - value0;
       
       const { min: currentMin, max: currentMax } = zoomStateRef.current;
-      let newMin = currentMin - deltaData;
-      let newMax = currentMax - deltaData;
+      const currentRange = currentMax - currentMin;
       
-      // Apply limits
+      // Calculate new positions
+      let newMin = currentMin - deltaValue;
+      let newMax = currentMax - deltaValue;
+      
+      // Prevent panning beyond bounds
       if (newMin < 0) {
-        newMax += (0 - newMin);
+        // If trying to pan beyond left edge, lock to 0
         newMin = 0;
+        newMax = currentRange;
+      } else if (newMax > totalDataRange.max) {
+        // If trying to pan beyond right edge, lock to max
+        newMax = totalDataRange.max;
+        newMin = newMax - currentRange;
       }
-      if (newMax > xMax) {
-        newMin -= (newMax - xMax);
-        newMax = xMax;
-      }
-      if (newMin < 0) newMin = 0;
       
       // Update zoom state
       zoomStateRef.current = { min: newMin, max: newMax };
