@@ -109,6 +109,38 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Add state for touch pan
   const touchPanRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Move device detection to a memoized value that's computed once
+  const isMobile = useMemo(() => {
+    const mediaQuery = window.matchMedia('(max-width: 768px)').matches;
+    const touchScreen = 'ontouchstart' in window;
+    const touchPoints = navigator.maxTouchPoints > 0;
+    const userAgent = navigator.userAgent.toLowerCase();
+    
+    // Check if it's actually a mobile device
+    const isMobileDevice = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+    
+    // Consider it mobile if:
+    // 1. Screen size is mobile-like OR
+    // 2. It's actually a mobile device (based on userAgent)
+    const isActuallyMobile = mediaQuery || isMobileDevice;
+    
+    console.log('[PitchGraph] Device detection:', {
+      mediaQuery,
+      touchScreen,
+      touchPoints,
+      maxTouchPoints: navigator.maxTouchPoints,
+      userAgent,
+      isMobileDevice,
+      isActuallyMobile
+    });
+    
+    return isActuallyMobile;
+  }, []); // Empty dependency array means this only runs once on mount
+
+  useEffect(() => {
+    console.log('[PitchGraph] Device type:', isMobile ? 'mobile' : 'desktop');
+  }, [isMobile]);
+
   // Initialize drag controller when chart is ready
   useEffect(() => {
     if (chartRef.current && onLoopChange) {
@@ -650,13 +682,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   };
 
-  // Add function to check if device is mobile
-  const isMobileDevice = () => {
-    return window.matchMedia('(max-width: 768px)').matches || 
-           ('ontouchstart' in window) ||
-           (navigator.maxTouchPoints > 0);
-  };
-
   // Memoize options without zoom plugin
   const options = useMemo(() => {
     return ({
@@ -669,7 +694,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       legend: { display: false },
       title: { display: false },
       tooltip: { 
-        enabled: !isMobileDevice(),  // Disable tooltips on mobile
+        enabled: !isMobile,  // Use memoized value
       },
       loopOverlay: { loopStart, loopEnd },
       playbackIndicator: { playbackTime: 0 },
@@ -698,7 +723,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     elements: {
       line: { tension: 0.2 },
     },
-  })}, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max]);
+  })}, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile]);
 
   // Auto-reset zoom when new pitch data is loaded
   useEffect(() => {
@@ -850,7 +875,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           color: '#666',
         }}>
           <div style={{ display: 'flex', gap: 16 }}>
-            {isMobileDevice() ? (
+            {isMobile ? (
               <>
                 <span>🤏 Pinch to zoom</span>
                 <span>👆 Drag to pan</span>
