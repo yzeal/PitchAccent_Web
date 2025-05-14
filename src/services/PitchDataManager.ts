@@ -81,6 +81,13 @@ export class PitchDataManager {
   }
 
   async initialize(file: File) {
+    // Reset all state when initializing with a new file
+    this.segments.clear();
+    this.totalDuration = 0;
+    this.isProgressiveMode = false;
+    this.currentFile = null;
+
+    // Now initialize with the new file
     this.currentFile = file;
     this.totalDuration = await this.getFileDuration(file);
     console.log('[PitchDataManager] File duration:', this.totalDuration, 'seconds');

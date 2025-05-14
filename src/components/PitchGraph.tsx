@@ -204,21 +204,24 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
 
   // Initialize zoom state and view range when xMax changes
   useEffect(() => {
-    if (xMax !== zoomStateRef.current.max) {
+    if (chartRef.current) {
+      // Always reset zoom state when new data is loaded
       const newRange = { min: 0, max: xMax };
       zoomStateRef.current = newRange;
       setViewRange(newRange);
       
-      // Update chart scales if chart exists
-      if (chartRef.current?.options?.scales?.x) {
+      // Update chart scales directly
+      if (chartRef.current.options.scales?.x) {
         chartRef.current.options.scales.x.min = 0;
         chartRef.current.options.scales.x.max = xMax;
-        chartRef.current.scales.x.min = 0;
-        chartRef.current.scales.x.max = xMax;
-        chartRef.current.update('none');
       }
+      chartRef.current.scales.x.min = 0;
+      chartRef.current.scales.x.max = xMax;
+      chartRef.current.update('none');
+
+      console.log('[PitchGraph] Reset zoom state for new data:', { xMax, newRange });
     }
-  }, [xMax]);
+  }, [xMax, times.length]); // Add times.length as dependency to ensure reset on new data
 
   // Modify useEffect to call onViewChange when view range changes
   useEffect(() => {
