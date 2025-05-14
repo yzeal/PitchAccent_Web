@@ -42,4 +42,4 @@ When working with long videos, the current user flow for finding and practicing 
 These improvements would maintain current functionality while making it easier for users to navigate and practice specific sections in longer videos. 
 
 **Auto-loop current view**: When jumping to playback position, automatically set the loop region to the current view
-This sounds good. Maybe have it as a checkbox (default: false) and otherwise perform a "loop visible" after "jump to playback" automatically as well as after panning.
+This sounds good. Maybe have it as a checkbox (default: false) and otherwise perform a "loop visible" after "jump to playback" automatically as well as after panning or zooming.
