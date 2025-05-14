@@ -80,6 +80,9 @@ const App: React.FC = () => {
     maxCachedSegments: 6   // Keep 6 segments in memory
   }));
 
+  // Add a ref to track last valid user-set loop region
+  const userSetLoopRef = useRef<{start: number, end: number} | null>(null);
+
   // Add drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -227,16 +230,22 @@ const App: React.FC = () => {
     }
   }, [nativeMediaUrl, nativeMediaType]);
 
-  // Update loop end when native media is loaded
+  // Update loop end when native media is loaded - only if no user-set region exists
   React.useEffect(() => {
+    // Skip if we have a user-set loop region - that takes precedence
+    if (userSetLoopRef.current) {
+      console.log('[App] Skipping initial loop setup due to existing user-set region:', userSetLoopRef.current);
+      return;
+    }
+    
     const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
     
     // For long videos (>30s), set initial loop and view to first 10 seconds
     // For short videos, show the entire duration
     if (duration > 30) {
       const initialViewDuration = 10;
-      setLoopStart(0);
-      setLoopEnd(initialViewDuration);
+      setLoopStartWithLogging(0);
+      setLoopEndWithLogging(initialViewDuration);
       
       // Update chart view range if chart is ready
       if (nativeChartInstance) {
@@ -265,24 +274,90 @@ const App: React.FC = () => {
         }
       }
     } else {
-      setLoopStart(0);
-      setLoopEnd(duration);
+      setLoopStartWithLogging(0);
+      setLoopEndWithLogging(duration);
     }
     
     fitYAxisToLoop();
   }, [nativePitchData.times, nativeChartInstance]);
 
+  // Add a guard to protect loop region changes from events other than user interaction
+  React.useEffect(() => {
+    // Always run fitYAxisToLoop when loop region changes to update visuals
+    if (nativePitchData.times.length > 0) {
+      console.log('[App] Loop region changed, fitting Y axis:', { 
+        loopStart, 
+        loopEnd, 
+        source: 'loop change effect',
+        userSetLoop: userSetLoopRef.current
+      });
+      
+      // If user has set a custom loop region, but current values don't match,
+      // restore the user values (this is a safety check)
+      const userSetLoop = userSetLoopRef.current;
+      if (userSetLoop && 
+          (Math.abs(loopStart - userSetLoop.start) > 0.001 || 
+           Math.abs(loopEnd - userSetLoop.end) > 0.001)) {
+        
+        console.log('[App] Loop region overwritten detected, restoring user values:', {
+          current: {start: loopStart, end: loopEnd},
+          userSet: userSetLoop
+        });
+        
+        // Restore user values 
+        setLoopStartWithLogging(userSetLoop.start);
+        setLoopEndWithLogging(userSetLoop.end);
+        return;
+      }
+      
+      fitYAxisToLoop();
+    }
+  }, [loopStart, loopEnd]);
+
   // Add ref to track initial setup
   const initialSetupDoneRef = useRef(false);
 
   // Modify handleViewChange to prevent repeated triggers
-  const handleViewChange = useCallback(async (startTime: number, endTime: number) => {
+  const handleViewChange = useCallback(async (startTime: number, endTime: number, preservedLoopStart?: number, preservedLoopEnd?: number) => {
     // Clear any pending timeout
     if (viewChangeTimeoutRef.current) {
       clearTimeout(viewChangeTimeoutRef.current);
     }
 
-    // Set new timeout
+    // Determine which loop region to restore
+    // First check if user has manually set a loop region
+    const userSetLoop = userSetLoopRef.current;
+    // Then check if we have preserved values from the event
+    const hasPreservedValues = preservedLoopStart !== undefined && preservedLoopEnd !== undefined;
+    
+    // Create a local copy of loop values to restore
+    const loopRegionToRestore = userSetLoop ? 
+      { start: userSetLoop.start, end: userSetLoop.end } : 
+      hasPreservedValues ? 
+        { start: preservedLoopStart!, end: preservedLoopEnd! } : 
+        { start: loopStart, end: loopEnd };
+    
+    console.log('[App] View change requested with loop region:', {
+      startTime,
+      endTime,
+      loopRegionToRestore,
+      currentLoopStart: loopStart,
+      currentLoopEnd: loopEnd,
+      userSetLoop,
+      stack: new Error().stack?.split('\n').slice(1, 3).join('\n')
+    });
+
+    // Immediately preserve loop region
+    const currentLoopStart = loopRegionToRestore.start;
+    const currentLoopEnd = loopRegionToRestore.end;
+    
+    // Only update if values have changed
+    if (Math.abs(loopStart - currentLoopStart) > 0.001 || Math.abs(loopEnd - currentLoopEnd) > 0.001) {
+      setLoopStartWithLogging(currentLoopStart);
+      setLoopEndWithLogging(currentLoopEnd);
+    }
+
+    // Set new timeout for data loading (separated from loop region handling)
     viewChangeTimeoutRef.current = setTimeout(async () => {
       try {
         // Only load segments if we're in progressive mode
@@ -298,7 +373,11 @@ const App: React.FC = () => {
             endTime,
             isInitialLoad,
             isLongVideo,
-            duration
+            duration,
+            preservedLoopRegion: { start: currentLoopStart, end: currentLoopEnd },
+            currentLoopStart: loopStart,
+            currentLoopEnd: loopEnd,
+            userSetLoop
           });
           
           // For initial load of long videos, force loading only first segment
@@ -306,7 +385,20 @@ const App: React.FC = () => {
             console.log('[App] Initial load of long video, forcing first segment only');
             await pitchManager.current.loadSegmentsForTimeRange(0, 10);
             const visibleData = pitchManager.current.getPitchDataForTimeRange(0, 10);
+            
+            // Set initial loop region for first load only if no user-set region
+            if (!userSetLoop) {
+              setLoopStartWithLogging(0);
+              setLoopEndWithLogging(10);
+            } else {
+              // Restore user-set values
+              setLoopStartWithLogging(userSetLoop.start);
+              setLoopEndWithLogging(userSetLoop.end);
+            }
+            
+            // Update pitch data
             setNativePitchData(visibleData);
+            
             initialSetupDoneRef.current = true;
           } else if (!isInitialLoad) {
             // Only load new segments if this is not the initial setup
@@ -315,19 +407,29 @@ const App: React.FC = () => {
             // Get data for the current view
             const visibleData = pitchManager.current.getPitchDataForTimeRange(startTime, endTime);
             
-            // Save current loop boundaries before updating data
-            const currentLoopStart = loopStart;
-            const currentLoopEnd = loopEnd;
-            
-            // Update pitch data
+            // Update pitch data without modifying loop region
             setNativePitchData(visibleData);
             
-            // Make sure loop region stays consistent during data loading
-            // This prevents loop region from being reset to view bounds
-            if (currentLoopStart !== 0 || currentLoopEnd !== endTime) {
-              // Only update if values are different from view bounds
-              setLoopStart(currentLoopStart);
-              setLoopEnd(currentLoopEnd);
+            // Ensure loop region is still correct after data loading
+            // First check for userSetLoop, which takes highest priority
+            if (userSetLoop) {
+              if (loopStart !== userSetLoop.start || loopEnd !== userSetLoop.end) {
+                console.log('[App] Re-applying user-set loop region after data loading:', {
+                  current: { start: loopStart, end: loopEnd },
+                  userSet: userSetLoop
+                });
+                setLoopStartWithLogging(userSetLoop.start);
+                setLoopEndWithLogging(userSetLoop.end);
+              }
+            }
+            // Then check for preserved values
+            else if (Math.abs(loopStart - currentLoopStart) > 0.001 || Math.abs(loopEnd - currentLoopEnd) > 0.001) {
+              console.log('[App] Re-applying preserved loop region after data loading:', {
+                current: { start: loopStart, end: loopEnd },
+                preserved: { start: currentLoopStart, end: currentLoopEnd }
+              });
+              setLoopStartWithLogging(currentLoopStart);
+              setLoopEndWithLogging(currentLoopEnd);
             }
           }
         }
@@ -339,6 +441,12 @@ const App: React.FC = () => {
 
   // Consolidate initial view setup into a single effect
   React.useEffect(() => {
+    // Only proceed if we don't have a user-set loop region
+    if (userSetLoopRef.current) {
+      console.log('[App] Skipping initial view setup due to existing user-set region:', userSetLoopRef.current);
+      return;
+    }
+    
     if (nativeChartInstance && nativePitchData.times.length > 0 && !initialSetupDoneRef.current) {
       const duration = nativePitchData.times[nativePitchData.times.length - 1];
       
@@ -372,20 +480,52 @@ const App: React.FC = () => {
     }
   }, [nativeChartInstance, nativePitchData.times, handleViewChange]);
 
-  // Add effect to update y-axis when loop region changes
-  React.useEffect(() => {
-    if (nativePitchData.times.length > 0) {
-      fitYAxisToLoop();
+  // Modify onLoopChange to store the user-set values in the ref
+  const onLoopChangeHandler = (start: number, end: number) => {
+    console.log('[App] Loop region changed by user interaction:', { start, end });
+    
+    // Store these values as the last valid user-set values
+    userSetLoopRef.current = { start, end };
+    
+    setLoopStartWithLogging(start);
+    setLoopEndWithLogging(end);
+    if (getActiveMediaElement()) {
+      getActiveMediaElement()!.currentTime = start;
     }
-  }, [loopStart, loopEnd]);
+    fitYAxisToLoop();
+  };
 
+  // Modify the fitYAxisToLoop function to check for valid user-set values
   function fitYAxisToLoop() {
     if (!nativePitchData.times.length) return;
+
+    // Make sure we're using the last valid user-set loop region if available
+    const currentLoopStart = loopStart;
+    const currentLoopEnd = loopEnd;
+    const userSetLoop = userSetLoopRef.current;
+
+    // If we detect that the loop region doesn't match the user-set values, restore them
+    if (userSetLoop && 
+        (Math.abs(currentLoopStart - userSetLoop.start) > 0.001 || 
+         Math.abs(currentLoopEnd - userSetLoop.end) > 0.001)) {
+      console.log('[App] Loop region mismatch detected, restoring user-set values:', {
+        current: { start: currentLoopStart, end: currentLoopEnd },
+        userSet: userSetLoop
+      });
+      
+      // Restore the user-set values
+      setLoopStartWithLogging(userSetLoop.start);
+      setLoopEndWithLogging(userSetLoop.end);
+      
+      // Use these values for further calculations
+      return;
+    }
 
     // Make sure we're using the latest loop region boundaries
     console.log('[App] Starting Y axis fitting with loop region:', {
       loopStart,
-      loopEnd
+      loopEnd,
+      stack: new Error().stack?.split('\n').slice(1, 3).join('\n')
     });
 
     // Find all pitches within the loop region
@@ -396,6 +536,12 @@ const App: React.FC = () => {
         const pitch = nativePitchData.pitches[i];
         if (pitch !== null) pitchesInRange.push(pitch);
       }
+    }
+
+    // Skip the rest of the fitting if we don't have any pitches in range
+    if (pitchesInRange.length === 0) {
+      console.log('[App] No pitches found in loop region, skipping Y axis fitting');
+      return;
     }
 
     // Determine which pitches to use for y-axis fitting
@@ -446,6 +592,28 @@ const App: React.FC = () => {
 
     setLoopYFit([minPitch, maxPitch]);
   }
+
+  // Update the view change handler
+  const onViewChangeHandler = (startTime: number, endTime: number, preservedLoopStart?: number, preservedLoopEnd?: number) => {
+    console.log('[App] View change from PitchGraph:', { 
+      startTime, 
+      endTime, 
+      preservedLoopStart, 
+      preservedLoopEnd,
+      currentLoopStart: loopStart,
+      currentLoopEnd: loopEnd,
+      userSetLoop: userSetLoopRef.current
+    });
+    
+    // Prefer user-set values if available, otherwise use preserved values
+    const loopToPreserve = userSetLoopRef.current || 
+      (preservedLoopStart !== undefined && preservedLoopEnd !== undefined ? 
+        { start: preservedLoopStart, end: preservedLoopEnd } : 
+        { start: loopStart, end: loopEnd });
+        
+    // Call handleViewChange with the preferred loop values
+    handleViewChange(startTime, endTime, loopToPreserve.start, loopToPreserve.end);
+  };
 
   // --- Native playback time tracking ---
   React.useEffect(() => {
@@ -526,6 +694,13 @@ const App: React.FC = () => {
   // On initial load or when nativePitchData changes, fit y axis to full pitch curve
   React.useEffect(() => {
     if (!nativePitchData.pitches.length) return;
+    
+    console.log('[App] nativePitchData.pitches changed, current loop region:', {
+      loopStart,
+      loopEnd
+    });
+    
+    // We'll only adjust the Y-axis range but not change the loop region
     const pitches = nativePitchData.pitches.filter(p => p !== null) as number[];
     if (pitches.length > 0) {
       let minPitch = Math.min(...pitches);
@@ -544,6 +719,8 @@ const App: React.FC = () => {
         minPitch = Math.max(0, Math.floor(center - 300));
         maxPitch = Math.min(600, Math.ceil(center + 300));
       }
+      
+      // Just update the Y-axis range, don't modify the loop region
       setLoopYFit([minPitch, maxPitch]);
     }
   }, [nativePitchData.pitches]);
@@ -606,6 +783,25 @@ const App: React.FC = () => {
       media.removeEventListener('loadedmetadata', onLoadedMetadata);
     };
   }, [nativeMediaUrl, nativeMediaType]);
+
+  // Add wrapped setState functions with logging
+  const setLoopStartWithLogging = (value: number) => {
+    console.log('[App] setLoopStart called with:', { 
+      value, 
+      previousValue: loopStart,
+      stack: new Error().stack?.split('\n').slice(1, 4).join('\n')
+    });
+    setLoopStart(value);
+  };
+  
+  const setLoopEndWithLogging = (value: number) => {
+    console.log('[App] setLoopEnd called with:', { 
+      value, 
+      previousValue: loopEnd,
+      stack: new Error().stack?.split('\n').slice(1, 4).join('\n') 
+    });
+    setLoopEnd(value);
+  };
 
   return (
     <div 
@@ -714,8 +910,10 @@ const App: React.FC = () => {
                   <button
                     onClick={() => {
                       const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
-                      setLoopStart(0);
-                      setLoopEnd(duration);
+                      userSetLoopRef.current = null;
+                      console.log('[App] Clearing user-set loop region');
+                      setLoopStartWithLogging(0);
+                      setLoopEndWithLogging(duration);
                       const media = getActiveMediaElement();
                       if (media) {
                         media.currentTime = 0;
@@ -761,8 +959,12 @@ const App: React.FC = () => {
                         const xMin = chart.scales.x.min;
                         const xMax = chart.scales.x.max;
                         console.log('Setting loop to visible region:', xMin, xMax);
-                        setLoopStart(xMin);
-                        setLoopEnd(xMax);
+                        
+                        // Update userSetLoopRef since this is a user action
+                        userSetLoopRef.current = { start: xMin, end: xMax };
+                        
+                        setLoopStartWithLogging(xMin);
+                        setLoopEndWithLogging(xMax);
                         const media = getActiveMediaElement();
                         if (media) {
                           media.currentTime = xMin;
@@ -787,15 +989,8 @@ const App: React.FC = () => {
               loopEnd={loopEnd}
               yFit={loopYFit}
               playbackTime={nativePlaybackTime}
-              onLoopChange={(start, end) => {
-                setLoopStart(start);
-                setLoopEnd(end);
-                if (getActiveMediaElement()) {
-                  getActiveMediaElement()!.currentTime = start;
-                }
-                fitYAxisToLoop();
-              }}
-              onViewChange={handleViewChange}
+              onLoopChange={onLoopChangeHandler}
+              onViewChange={onViewChangeHandler}
               showNavigationHints={true}
               totalDuration={nativeMediaDuration}
               initialViewDuration={nativeMediaDuration > 30 ? 10 : undefined}

@@ -43,7 +43,7 @@ export interface PitchGraphWithControlsProps {
   playbackTime?: number;
   onChartReady?: (chart: Chart<'line', (number | null)[], number> | null) => void;
   onLoopChange?: (start: number, end: number) => void;
-  onViewChange?: (startTime: number, endTime: number) => void;
+  onViewChange?: (startTime: number, endTime: number, loopStart?: number, loopEnd?: number) => void;
   showNavigationHints?: boolean;
   totalDuration?: number;
   initialViewDuration?: number;
@@ -80,6 +80,19 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   
   // Create a ref for the drag controller
   const dragControllerRef = useRef<DragController | null>(null);
+
+  // Add a ref to preserve the loop region independently of chart state
+  const preservedLoopRef = useRef<{ start: number; end: number }>({ 
+    start: loopStart ?? 0, 
+    end: loopEnd ?? 0 
+  });
+
+  // Update preserved loop values when props change
+  useEffect(() => {
+    if (loopStart !== undefined && loopEnd !== undefined) {
+      preservedLoopRef.current = { start: loopStart, end: loopEnd };
+    }
+  }, [loopStart, loopEnd]);
 
   // Track user interaction state
   const isUserInteractingRef = useRef(false);
@@ -238,24 +251,25 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       dragControllerRef.current = new DragController({
         chart: chartRef.current,
         onLoopChange: (start, end) => {
-          // Debounce the loop change callback
-          if (onLoopChange && 
-              (Math.abs(start - (loopStart ?? 0)) > 0.001 || 
-               Math.abs(end - (loopEnd ?? 0)) > 0.001)) {
-            // Update chart immediately for visual feedback
-            if (chartRef.current?.options.plugins?.loopOverlay) {
-              chartRef.current.options.plugins.loopOverlay = {
-                loopStart: start,
-                loopEnd: end
-              };
-              chartRef.current.update('none');
-            }
-            // Notify parent
+          // Store in our ref first
+          preservedLoopRef.current = { start, end };
+          
+          // Then update the chart
+          if (chartRef.current?.options.plugins?.loopOverlay) {
+            chartRef.current.options.plugins.loopOverlay = {
+              loopStart: start,
+              loopEnd: end
+            };
+            chartRef.current.update('none');
+          }
+          
+          // Notify parent if callback exists
+          if (onLoopChange) {
             onLoopChange(start, end);
           }
         },
-        loopStart: loopStart ?? 0,
-        loopEnd: loopEnd ?? 0,
+        loopStart: preservedLoopRef.current.start,
+        loopEnd: preservedLoopRef.current.end,
         marginThresholdPixels: 40,
         maxDragLimit: totalDuration || totalDataRange.max,
         onDragStart: () => {
@@ -274,24 +288,25 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       dragControllerRef.current.updateValues({
         chart: chartRef.current,
         onLoopChange: (start, end) => {
-          // Debounce the loop change callback
-          if (onLoopChange && 
-              (Math.abs(start - (loopStart ?? 0)) > 0.001 || 
-               Math.abs(end - (loopEnd ?? 0)) > 0.001)) {
-            // Update chart immediately for visual feedback
-            if (chartRef.current?.options.plugins?.loopOverlay) {
-              chartRef.current.options.plugins.loopOverlay = {
-                loopStart: start,
-                loopEnd: end
-              };
-              chartRef.current.update('none');
-            }
-            // Notify parent
+          // Store in our ref first
+          preservedLoopRef.current = { start, end };
+          
+          // Then update the chart
+          if (chartRef.current?.options.plugins?.loopOverlay) {
+            chartRef.current.options.plugins.loopOverlay = {
+              loopStart: start,
+              loopEnd: end
+            };
+            chartRef.current.update('none');
+          }
+          
+          // Notify parent if callback exists
+          if (onLoopChange) {
             onLoopChange(start, end);
           }
         },
-        loopStart: loopStart ?? 0,
-        loopEnd: loopEnd ?? 0,
+        loopStart: preservedLoopRef.current.start,
+        loopEnd: preservedLoopRef.current.end,
         maxDragLimit: totalDuration || totalDataRange.max,
         onDragStart: () => {
           // Disable pan/zoom while dragging
@@ -436,12 +451,18 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     isUserInteractingRef.current = true;
     isZoomingRef.current = true;
     
+    // Get current loop values from our ref, not from the chart
+    const currentLoopStart = preservedLoopRef.current.start;
+    const currentLoopEnd = preservedLoopRef.current.end;
+    
     const { min: currentMin, max: currentMax } = zoomStateRef.current;
     const mouseX = e.offsetX;
     
     // Calculate the data value at mouse position
     const xScale = chart.scales.x;
-    const mouseDataX = xScale?.getValueForPixel?.(mouseX);
+    if (!xScale || typeof xScale.getValueForPixel !== 'function') return;
+    
+    const mouseDataX = xScale.getValueForPixel(mouseX);
     if (mouseDataX === undefined) return;
     
     // Calculate zoom factor
@@ -478,10 +499,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       newMax = maxViewRange;
     }
 
-    // Store current loop region values
-    const currentLoopStart = chart.options.plugins?.loopOverlay?.loopStart ?? 0;
-    const currentLoopEnd = chart.options.plugins?.loopOverlay?.loopEnd ?? 0;
-
     // Update zoom state
     zoomStateRef.current = { min: newMin, max: newMax };
     
@@ -491,18 +508,20 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       chart.options.scales.x.max = newMax;
     }
     
-    // Restore loop region
+    // Always restore the loop region with the preserved values
     if (chart.options.plugins?.loopOverlay) {
       chart.options.plugins.loopOverlay = {
-        loopStart: currentLoopStart,
-        loopEnd: currentLoopEnd
+        loopStart: preservedLoopRef.current.start,
+        loopEnd: preservedLoopRef.current.end
       };
     }
     
     chart.update('none');
     
-    // Notify parent of view change
-    onViewChange?.(newMin, newMax);
+    // Notify parent of view change, passing the preserved loop values
+    if (onViewChange) {
+      onViewChange(newMin, newMax, currentLoopStart, currentLoopEnd);
+    }
 
     // Reset interaction flags after a short delay
     setTimeout(() => {
@@ -516,6 +535,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const chart = chartRef.current;
     if (!chart || !lastMouseXRef.current || !isPanningRef.current || dragControllerRef.current?.isDragging()) return;
 
+    // Get loop values from our ref, not from the chart
+    const currentLoopStart = preservedLoopRef.current.start;
+    const currentLoopEnd = preservedLoopRef.current.end;
+
     const { min: currentMin, max: currentMax } = zoomStateRef.current;
     const currentRange = currentMax - currentMin;
     const maxRange = actualTotalRangeRef.current;
@@ -526,14 +549,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         currentRange <= 0 || 
         currentMin < 0 ||
         currentMax > maxRange) {
-        console.log('[PitchGraph] Stopping pan - invalid state detected:', {
-            currentRange,
-            maxRange,
-            zoomState: { ...zoomStateRef.current },
-            totalRange: { ...totalDataRange },
-            actualTotalRange: actualTotalRangeRef.current,
-            isZoomedOut: currentRange >= maxRange
-        });
         // Reset to safe state
         isPanningRef.current = false;
         lastMouseXRef.current = null;
@@ -548,14 +563,12 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
                 chart.options.scales.x.max = safeRange.max;
             }
             chart.update('none');
-            onViewChange?.(safeRange.min, safeRange.max);
+            if (onViewChange) {
+                onViewChange(safeRange.min, safeRange.max, currentLoopStart, currentLoopEnd);
+            }
         }
         return;
     }
-
-    // Store current loop region values
-    const currentLoopStart = chart.options.plugins?.loopOverlay?.loopStart ?? 0;
-    const currentLoopEnd = chart.options.plugins?.loopOverlay?.loopEnd ?? 0;
 
     const mouseX = e.offsetX;
     const dx = mouseX - lastMouseXRef.current;
@@ -567,29 +580,13 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     let newMin = currentMin - deltaX;
     let newMax = currentMax - deltaX;
 
-    // Prevent panning beyond bounds with improved precision
+    // Prevent panning beyond bounds
     if (newMin < 0) {
-        // If trying to pan beyond left edge, lock to 0
         newMin = 0;
         newMax = currentRange;
     } else if (newMax > maxRange) {
-        // If trying to pan beyond right edge, lock to max
         newMax = maxRange;
         newMin = Math.max(0, newMax - currentRange);
-    }
-
-    // Additional validation of the new range before applying
-    const newRange = newMax - newMin;
-    if (newRange <= 0 || newMin < 0 || newMax > maxRange) {
-        console.log('[PitchGraph] Invalid new range calculated:', {
-            newMin,
-            newMax,
-            newRange,
-            maxRange,
-            currentRange,
-            actualTotalRange: actualTotalRangeRef.current
-        });
-        return;
     }
 
     // Only update if we actually moved and the new range is valid
@@ -604,7 +601,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             chart.options.scales.x.max = newMax;
         }
         
-        // Restore loop region
+        // Always restore the loop region with preserved values
         if (chart.options.plugins?.loopOverlay) {
             chart.options.plugins.loopOverlay = {
                 loopStart: currentLoopStart,
@@ -614,8 +611,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         
         chart.update('none');
 
-        // Notify parent of view change
-        onViewChange?.(newMin, newMax);
+        // Notify parent of view change, passing the preserved loop values
+        if (onViewChange) {
+          onViewChange(newMin, newMax, currentLoopStart, currentLoopEnd);
+        }
     }
   };
 
@@ -694,6 +693,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
       
+      // Get current loop values from our ref, not from the chart
+      const currentLoopStart = preservedLoopRef.current.start;
+      const currentLoopEnd = preservedLoopRef.current.end;
+      
       // Calculate new distance
       const newDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
       const initialDistance = touchStartRef.current.distance!;
@@ -734,11 +737,24 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         chart.options.scales.x.max = finalMax;
       }
       
+      // Always restore the loop region with preserved values
+      if (chart.options.plugins?.loopOverlay) {
+        chart.options.plugins.loopOverlay = {
+          loopStart: preservedLoopRef.current.start,
+          loopEnd: preservedLoopRef.current.end
+        };
+      }
+      
       // Update view range
       setViewRange({ min: finalMin, max: finalMax });
       
       // Update chart
       chart.update('none');
+      
+      // Notify parent of view change with preserved loop values
+      if (onViewChange) {
+        onViewChange(finalMin, finalMax, currentLoopStart, currentLoopEnd);
+      }
       
       // Update touch start reference for next move
       touchStartRef.current = {
@@ -751,6 +767,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     } else if (e.touches.length === 1 && touchPanRef.current) {
       // Single-touch pan move
       const touch = e.touches[0];
+      
+      // Get current loop values from our ref, not from the chart
+      const currentLoopStart = preservedLoopRef.current.start;
+      const currentLoopEnd = preservedLoopRef.current.end;
+      
       const deltaX = touch.clientX - touchPanRef.current.x;
       
       const xScale = chart.scales.x;
@@ -789,11 +810,24 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         chart.options.scales.x.max = newMax;
       }
       
+      // Always restore the loop region with preserved values
+      if (chart.options.plugins?.loopOverlay) {
+        chart.options.plugins.loopOverlay = {
+          loopStart: preservedLoopRef.current.start,
+          loopEnd: preservedLoopRef.current.end
+        };
+      }
+      
       // Update view range
       setViewRange({ min: newMin, max: newMax });
       
       // Update chart
       chart.update('none');
+      
+      // Notify parent of view change with preserved loop values
+      if (onViewChange) {
+        onViewChange(newMin, newMax, currentLoopStart, currentLoopEnd);
+      }
       
       // Update touch reference for next move
       touchPanRef.current = {
@@ -1123,7 +1157,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     chartRef.current.update('none');
 
     // Notify parent of view change
-    onViewChange?.(resetRange.min, resetRange.max);
+    if (onViewChange) {
+      onViewChange(resetRange.min, resetRange.max);
+    }
   };
 
   // Update playback time without recalculating options
@@ -1141,11 +1177,17 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         loopStart: visualValues.start,
         loopEnd: visualValues.end
       };
-    } else if (loopStart !== undefined && loopEnd !== undefined) {
-      // Make sure loop overlay always has the correct values
+      
+      // Also update our preserved ref to match the dragged values
+      preservedLoopRef.current = {
+        start: visualValues.start,
+        end: visualValues.end
+      };
+    } else {
+      // Make sure loop overlay always has the correct values from our ref
       chart.options.plugins.loopOverlay = {
-        loopStart: loopStart,
-        loopEnd: loopEnd
+        loopStart: preservedLoopRef.current.start,
+        loopEnd: preservedLoopRef.current.end
       };
     }
     
