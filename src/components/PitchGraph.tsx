@@ -46,6 +46,7 @@ export interface PitchGraphWithControlsProps {
   onViewChange?: (startTime: number, endTime: number) => void;
   showNavigationHints?: boolean;
   totalDuration?: number;
+  initialViewDuration?: number;
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -70,6 +71,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     onViewChange,
     showNavigationHints = false,
     totalDuration,
+    initialViewDuration,
   } = props;
   
   const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
@@ -235,25 +237,34 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     // Update the actual total range ref
     actualTotalRangeRef.current = newMax;
     
-    // Always reset zoom state when total duration changes
-    const updatedRange = {
-        min: 0,
-        max: newMax
+    // Set initial view range based on initialViewDuration if provided
+    const updatedRange = initialViewDuration ? {
+      min: 0,
+      max: Math.min(initialViewDuration, newMax)
+    } : {
+      min: 0,
+      max: newMax
     };
     
-    setTotalDataRange(updatedRange);
+    console.log('[PitchGraph] Setting initial view range:', {
+      updatedRange,
+      initialViewDuration: initialViewDuration,
+      totalDuration: newMax
+    });
+    
+    setTotalDataRange({ min: 0, max: newMax });
     zoomStateRef.current = { ...updatedRange };
     setViewRange(updatedRange);
     
     // Update chart if it exists
     if (chartRef.current) {
-        if (chartRef.current.options.scales?.x) {
-            chartRef.current.options.scales.x.min = updatedRange.min;
-            chartRef.current.options.scales.x.max = updatedRange.max;
-        }
-        chartRef.current.update('none');
+      if (chartRef.current.options.scales?.x) {
+        chartRef.current.options.scales.x.min = updatedRange.min;
+        chartRef.current.options.scales.x.max = updatedRange.max;
+      }
+      chartRef.current.update('none');
     }
-  }, [totalDuration]); // Only depend on totalDuration since it's our source of truth
+  }, [totalDuration, initialViewDuration]);
 
   // Remove the old initialization effect since we handle it in the data range update
   useEffect(() => {
@@ -981,26 +992,34 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   const handleResetZoom = () => {
     if (!chartRef.current) return;
     
-    const chart = chartRef.current;
-    const newMax = totalDuration || 1;
+    // Use initialViewDuration if provided, otherwise show full range
+    const resetRange = props.initialViewDuration ? {
+      min: 0,
+      max: Math.min(props.initialViewDuration, totalDataRange.max)
+    } : {
+      min: 0,
+      max: totalDataRange.max
+    };
     
-    // Update zoom state ref and view range
-    const newRange = { min: 0, max: newMax };
-    zoomStateRef.current = newRange;
-    setViewRange(newRange);
-    
-    // Update chart scales and options
-    if (chart.options.scales?.x) {
-        chart.options.scales.x.min = 0;
-        chart.options.scales.x.max = newMax;
+    console.log('[PitchGraph] Resetting zoom:', {
+      resetRange,
+      initialViewDuration: props.initialViewDuration,
+      totalRange: totalDataRange
+    });
+
+    // Update zoom state
+    zoomStateRef.current = resetRange;
+    setViewRange(resetRange);
+
+    // Update chart scales
+    if (chartRef.current.options.scales?.x) {
+      chartRef.current.options.scales.x.min = resetRange.min;
+      chartRef.current.options.scales.x.max = resetRange.max;
     }
-    
-    // Update actual scales
-    chart.scales.x.min = 0;
-    chart.scales.x.max = newMax;
-    
-    // Force chart to update its layout
-    chart.update('none');
+    chartRef.current.update('none');
+
+    // Notify parent of view change
+    onViewChange?.(resetRange.min, resetRange.max);
   };
 
   // Update playback time without recalculating options

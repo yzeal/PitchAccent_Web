@@ -230,10 +230,173 @@ const App: React.FC = () => {
   // Update loop end when native media is loaded
   React.useEffect(() => {
     const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
-    setLoopStart(0);
-    setLoopEnd(duration);
+    
+    // For long videos (>30s), set initial loop and view to first 10 seconds
+    // For short videos, show the entire duration
+    if (duration > 30) {
+      const initialViewDuration = 10;
+      setLoopStart(0);
+      setLoopEnd(initialViewDuration);
+      
+      // Update chart view range if chart is ready
+      if (nativeChartInstance) {
+        console.log('[App] Long video detected, setting initial view to first 10 seconds:', {
+          duration,
+          initialViewDuration,
+          chartInstance: !!nativeChartInstance
+        });
+        
+        // Update zoom state ref directly
+        if (nativeChartInstance.options.scales?.x) {
+          nativeChartInstance.options.scales.x.min = 0;
+          nativeChartInstance.options.scales.x.max = initialViewDuration;
+          
+          // Also update the zoom state ref in the PitchGraph component
+          const chartWithZoomState = nativeChartInstance as unknown as { zoomStateRef: { current: { min: number; max: number } } };
+          if (chartWithZoomState.zoomStateRef) {
+            chartWithZoomState.zoomStateRef.current = { min: 0, max: initialViewDuration };
+          }
+          
+          // Force the chart to update its layout
+          nativeChartInstance.update('none');
+          
+          // Notify parent of view change
+          handleViewChange(0, initialViewDuration);
+        }
+      }
+    } else {
+      setLoopStart(0);
+      setLoopEnd(duration);
+    }
+    
     fitYAxisToLoop();
-  }, [nativePitchData.times]);
+  }, [nativePitchData.times, nativeChartInstance]);
+
+  // Add effect to handle initial data loading and view setup
+  React.useEffect(() => {
+    if (nativePitchData.times.length > 0) {
+      const duration = nativePitchData.times[nativePitchData.times.length - 1];
+      
+      // For long videos, ensure we're only loading the first segment initially
+      if (duration > 30) {
+        console.log('[App] Long video detected, loading initial segment:', {
+          duration,
+          initialSegment: '0-10s'
+        });
+        
+        // Force initial view to first 10 seconds
+        if (nativeChartInstance) {
+          const initialViewDuration = 10;
+          
+          // Update chart scales
+          if (nativeChartInstance.options.scales?.x) {
+            nativeChartInstance.options.scales.x.min = 0;
+            nativeChartInstance.options.scales.x.max = initialViewDuration;
+            
+            // Update zoom state ref
+            const chartWithZoomState = nativeChartInstance as unknown as { zoomStateRef: { current: { min: number; max: number } } };
+            if (chartWithZoomState.zoomStateRef) {
+              chartWithZoomState.zoomStateRef.current = { min: 0, max: initialViewDuration };
+            }
+            
+            // Force chart update
+            nativeChartInstance.update('none');
+          }
+        }
+        
+        handleViewChange(0, 10);
+      }
+    }
+  }, [nativePitchData.times, nativeChartInstance]);
+
+  // Modify handleViewChange to maintain view state
+  const handleViewChange = useCallback(async (startTime: number, endTime: number) => {
+    // Clear any pending timeout
+    if (viewChangeTimeoutRef.current) {
+      clearTimeout(viewChangeTimeoutRef.current);
+    }
+
+    // Set new timeout
+    viewChangeTimeoutRef.current = setTimeout(async () => {
+      try {
+        // Only load segments if we're in progressive mode
+        if (pitchManager.current.isInProgressiveMode()) {
+          const isInitialLoad = nativePitchData.times.length === 0;
+          const duration = pitchManager.current.getTotalDuration();
+          const isLongVideo = duration > 30;
+          
+          console.log('[App] View change triggered:', { 
+            startTime, 
+            endTime,
+            isInitialLoad,
+            isLongVideo,
+            duration
+          });
+          
+          // For initial load of long videos, force loading only first segment
+          if (isInitialLoad && isLongVideo) {
+            console.log('[App] Initial load of long video, forcing first segment only');
+            await pitchManager.current.loadSegmentsForTimeRange(0, 10);
+            const visibleData = pitchManager.current.getPitchDataForTimeRange(0, 10);
+            setNativePitchData(visibleData);
+            
+            // Ensure chart view is set to first 10 seconds
+            if (nativeChartInstance && nativeChartInstance.options.scales?.x) {
+              nativeChartInstance.options.scales.x.min = 0;
+              nativeChartInstance.options.scales.x.max = 10;
+              
+              // Update zoom state ref
+              const chartWithZoomState = nativeChartInstance as unknown as { zoomStateRef: { current: { min: number; max: number } } };
+              if (chartWithZoomState.zoomStateRef) {
+                chartWithZoomState.zoomStateRef.current = { min: 0, max: 10 };
+              }
+              
+              nativeChartInstance.update('none');
+            }
+          } else {
+            await pitchManager.current.loadSegmentsForTimeRange(startTime, endTime);
+            const visibleData = pitchManager.current.getPitchDataForTimeRange(startTime, endTime);
+            setNativePitchData(visibleData);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading pitch data for time range:', error);
+      }
+    }, 100); // 100ms debounce
+  }, [nativeChartInstance]);
+
+  // Add effect to handle initial view range for long videos when chart becomes available
+  React.useEffect(() => {
+    if (nativeChartInstance && nativePitchData.times.length > 0) {
+      const duration = nativePitchData.times[nativePitchData.times.length - 1];
+      
+      if (duration > 30) {
+        const initialViewDuration = 10;
+        console.log('[App] Setting initial view range for long video:', {
+          duration,
+          initialViewDuration
+        });
+        
+        // Update zoom state ref directly
+        if (nativeChartInstance.options.scales?.x) {
+          nativeChartInstance.options.scales.x.min = 0;
+          nativeChartInstance.options.scales.x.max = initialViewDuration;
+          
+          // Also update the zoom state ref in the PitchGraph component
+          const chartWithZoomState = nativeChartInstance as unknown as { zoomStateRef: { current: { min: number; max: number } } };
+          if (chartWithZoomState.zoomStateRef) {
+            chartWithZoomState.zoomStateRef.current = { min: 0, max: initialViewDuration };
+          }
+          
+          // Force the chart to update its layout
+          nativeChartInstance.update('none');
+          
+          // Notify parent of view change
+          handleViewChange(0, initialViewDuration);
+        }
+      }
+    }
+  }, [nativeChartInstance, handleViewChange]);
 
   // Add effect to update y-axis when loop region changes
   React.useEffect(() => {
@@ -433,29 +596,6 @@ const App: React.FC = () => {
   // Add handler for view changes (zooming/panning)
   const viewChangeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
-  const handleViewChange = useCallback(async (startTime: number, endTime: number) => {
-    // Clear any pending timeout
-    if (viewChangeTimeoutRef.current) {
-      clearTimeout(viewChangeTimeoutRef.current);
-    }
-
-    // Set new timeout
-    viewChangeTimeoutRef.current = setTimeout(async () => {
-      try {
-        // Only load segments if we're in progressive mode
-        if (pitchManager.current.isInProgressiveMode()) {
-          console.log('[App] View change triggered:', { startTime, endTime });
-          await pitchManager.current.loadSegmentsForTimeRange(startTime, endTime);
-          const visibleData = pitchManager.current.getPitchDataForTimeRange(startTime, endTime);
-          console.log('[App] Updated pitch data loaded:', visibleData);
-          setNativePitchData(visibleData);
-        }
-      } catch (error) {
-        console.error('Error loading pitch data for time range:', error);
-      }
-    }, 100); // 100ms debounce
-  }, []);
-
   // Add state for media duration
   const [nativeMediaDuration, setNativeMediaDuration] = useState<number>(0);
 
@@ -679,6 +819,7 @@ const App: React.FC = () => {
               onViewChange={handleViewChange}
               showNavigationHints={true}
               totalDuration={nativeMediaDuration}
+              initialViewDuration={nativeMediaDuration > 30 ? 10 : undefined}
             />
           </section>
 
