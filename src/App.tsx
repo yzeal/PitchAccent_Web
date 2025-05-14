@@ -229,10 +229,80 @@ const App: React.FC = () => {
 
   // Update loop end when native media is loaded
   React.useEffect(() => {
-    const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0
-    setLoopStart(0)
-    setLoopEnd(duration)
-  }, [nativePitchData.times])
+    const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
+    setLoopStart(0);
+    setLoopEnd(duration);
+    fitYAxisToLoop();
+  }, [nativePitchData.times]);
+
+  // Add effect to update y-axis when loop region changes
+  React.useEffect(() => {
+    if (nativePitchData.times.length > 0) {
+      fitYAxisToLoop();
+    }
+  }, [loopStart, loopEnd]);
+
+  function fitYAxisToLoop() {
+    if (!nativePitchData.times.length) return;
+
+    // Find all pitches within the loop region
+    const pitchesInRange = [];
+    for (let i = 0; i < nativePitchData.times.length; i++) {
+      const time = nativePitchData.times[i];
+      if (time >= loopStart && time <= loopEnd) {
+        const pitch = nativePitchData.pitches[i];
+        if (pitch !== null) pitchesInRange.push(pitch);
+      }
+    }
+
+    // Determine which pitches to use for y-axis fitting
+    const pitchesToFit = pitchesInRange.length > 0 
+      ? pitchesInRange 
+      : nativePitchData.pitches.filter(p => p !== null) as number[];
+
+    if (pitchesToFit.length === 0) return;
+
+    // Calculate initial range
+    let minPitch = Math.min(...pitchesToFit);
+    let maxPitch = Math.max(...pitchesToFit);
+
+    // Add padding (at least 20Hz or 10% of range)
+    const padding = Math.max(20, (maxPitch - minPitch) * 0.1);
+    minPitch = Math.floor(minPitch - padding);
+    maxPitch = Math.ceil(maxPitch + padding);
+
+    // Enforce absolute limits
+    minPitch = Math.max(0, minPitch);
+    maxPitch = Math.min(600, maxPitch);
+
+    // Ensure minimum range for visibility
+    if (maxPitch - minPitch < 200) {
+      const center = (maxPitch + minPitch) / 2;
+      const halfRange = 100;
+      minPitch = Math.max(0, Math.floor(center - halfRange));
+      maxPitch = Math.min(600, Math.ceil(center + halfRange));
+    }
+
+    // Cap maximum range
+    if (maxPitch - minPitch > 600) {
+      const center = (maxPitch + minPitch) / 2;
+      const halfRange = 300;
+      minPitch = Math.max(0, Math.floor(center - halfRange));
+      maxPitch = Math.min(600, Math.ceil(center + halfRange));
+    }
+
+    console.log('[App] Fitting Y axis:', {
+      source: pitchesInRange.length > 0 ? 'loop region' : 'all pitches',
+      loopStart,
+      loopEnd,
+      pitchesFound: pitchesToFit.length,
+      minPitch,
+      maxPitch,
+      range: maxPitch - minPitch
+    });
+
+    setLoopYFit([minPitch, maxPitch]);
+  }
 
   // --- Native playback time tracking ---
   React.useEffect(() => {
@@ -334,58 +404,6 @@ const App: React.FC = () => {
       setLoopYFit([minPitch, maxPitch]);
     }
   }, [nativePitchData.pitches]);
-
-  // Function to fit y axis to the current loop region
-  function fitYAxisToLoop() {
-    if (!nativePitchData.times.length) return;
-    const startIdx = nativePitchData.times.findIndex(t => t >= loopStart);
-    const endIdx = nativePitchData.times.findIndex(t => t >= loopEnd);
-    const pitches = nativePitchData.pitches.slice(
-      startIdx >= 0 ? startIdx : 0,
-      endIdx > 0 ? endIdx : nativePitchData.pitches.length
-    ).filter(p => p !== null) as number[];
-    if (pitches.length > 0) {
-      let minPitch = Math.min(...pitches);
-      let maxPitch = Math.max(...pitches);
-      minPitch = Math.floor(minPitch - 20);
-      maxPitch = Math.ceil(maxPitch + 20);
-      minPitch = Math.max(0, minPitch);
-      maxPitch = Math.min(600, maxPitch);
-      if (maxPitch - minPitch < 200) {
-        const center = (maxPitch + minPitch) / 2;
-        minPitch = Math.max(0, Math.floor(center - 100));
-        maxPitch = Math.min(600, Math.ceil(center + 100));
-      }
-      if (maxPitch - minPitch > 600) {
-        const center = (maxPitch + minPitch) / 2;
-        minPitch = Math.max(0, Math.floor(center - 300));
-        maxPitch = Math.min(600, Math.ceil(center + 300));
-      }
-      setLoopYFit([minPitch, maxPitch]);
-    } else {
-      // If region is empty, fit to full pitch curve
-      const allPitches = nativePitchData.pitches.filter(p => p !== null) as number[];
-      if (allPitches.length > 0) {
-        let minPitch = Math.min(...allPitches);
-        let maxPitch = Math.max(...allPitches);
-        minPitch = Math.floor(minPitch - 20);
-        maxPitch = Math.ceil(maxPitch + 20);
-        minPitch = Math.max(0, minPitch);
-        maxPitch = Math.min(600, maxPitch);
-        if (maxPitch - minPitch < 200) {
-          const center = (maxPitch + minPitch) / 2;
-          minPitch = Math.max(0, Math.floor(center - 100));
-          maxPitch = Math.min(600, Math.ceil(center + 100));
-        }
-        if (maxPitch - minPitch > 600) {
-          const center = (maxPitch + minPitch) / 2;
-          minPitch = Math.max(0, Math.floor(center - 300));
-          maxPitch = Math.min(600, Math.ceil(center + 300));
-        }
-        setLoopYFit([minPitch, maxPitch]);
-      }
-    }
-  }
 
   React.useEffect(() => {
     if (!audioBlob) {
