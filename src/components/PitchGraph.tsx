@@ -44,6 +44,7 @@ export interface PitchGraphWithControlsProps {
   onChartReady?: (chart: Chart<'line', (number | null)[], number> | null) => void;
   onLoopChange?: (start: number, end: number) => void;
   onViewChange?: (startTime: number, endTime: number) => void;
+  showNavigationHints?: boolean;
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -66,6 +67,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     onChartReady,
     onLoopChange,
     onViewChange,
+    showNavigationHints = false,
   } = props;
   
   const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
@@ -650,7 +652,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
 
   // Add function to check if device is mobile
   const isMobileDevice = () => {
-    return window.matchMedia('(max-width: 768px)').matches;
+    return window.matchMedia('(max-width: 768px)').matches || 
+           ('ontouchstart' in window) ||
+           (navigator.maxTouchPoints > 0);
   };
 
   // Memoize options without zoom plugin
@@ -837,38 +841,49 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         position: 'relative',
       }}
     >
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        marginBottom: 8,
-        fontSize: '0.8rem',
-        color: '#666',
-      }}>
-        <div style={{ display: 'flex', gap: 16 }}>
-          <span>🖱️ Mouse wheel to zoom</span>
-          <span>👆 Drag to pan</span>
+      {showNavigationHints && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          marginBottom: 8,
+          fontSize: '0.8rem',
+          color: '#666',
+        }}>
+          <div style={{ display: 'flex', gap: 16 }}>
+            {isMobileDevice() ? (
+              <>
+                <span>🤏 Pinch to zoom</span>
+                <span>👆 Drag to pan</span>
+              </>
+            ) : (
+              <>
+                <span>🖱️ Mouse wheel to zoom</span>
+                <span>👆 Drag to pan</span>
+              </>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={handleResetZoom}
+              title="Reset Zoom"
+              style={{
+                padding: '2px 6px',
+                borderRadius: '50%',
+                border: 'none',
+                background: 'transparent',
+                color: '#1976d2',
+                fontSize: '1.1rem',
+                cursor: 'pointer',
+                minWidth: 0,
+                minHeight: 0,
+                lineHeight: 1,
+              }}
+            >
+              ↺
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            onClick={handleResetZoom}
-            title="Reset Zoom"
-            style={{
-              padding: '2px 6px',
-              borderRadius: '50%',
-              border: 'none',
-              background: 'transparent',
-              color: '#1976d2',
-              fontSize: '1.1rem',
-              cursor: 'pointer',
-              minWidth: 0,
-              minHeight: 0,
-              lineHeight: 1,
-            }}
-          >
-            ↺
-          </button>
-        </div>
-      </div>
+      )}
 
       <div
         style={{

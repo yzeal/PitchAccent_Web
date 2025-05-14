@@ -628,6 +628,7 @@ const App: React.FC = () => {
                 handleViewChange(start, end);
               }}
               onViewChange={handleViewChange}
+              showNavigationHints={true}
             />
           </section>
 
@@ -639,6 +640,7 @@ const App: React.FC = () => {
               label="Your Pitch (Hz)"
               color="#1976d2"
               playbackTime={userPlaybackTime}
+              showNavigationHints={false}
             />
             <Recorder
               onRecordingComplete={(_, blob: Blob) => setAudioBlob(blob)}
