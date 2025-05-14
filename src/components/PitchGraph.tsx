@@ -880,39 +880,70 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         }}
         className="pitch-graph-container"
       >
-        {zoomStateRef.current.max < xMax && (
-          <div style={{
-            position: 'absolute',
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 30,
-            background: 'linear-gradient(90deg, transparent, rgba(25, 118, 210, 0.1))',
-            pointerEvents: 'none',
-            zIndex: 1,
-          }} />
-        )}
-        {zoomStateRef.current.min > 0 && (
-          <div style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 30,
-            background: 'linear-gradient(-90deg, transparent, rgba(25, 118, 210, 0.1))',
-            pointerEvents: 'none',
-            zIndex: 1,
-          }} />
-        )}
-        
-        <Line ref={chartRef} data={chartData} options={{
-          ...options,
-          layout: {
-            padding: {
-              right: 30
+        <Line 
+          ref={chartRef} 
+          data={chartData} 
+          options={{
+            ...options,
+            layout: {
+              padding: {
+                right: 30
+              }
             }
-          }
-        }} plugins={[loopOverlayPlugin, playbackIndicatorPlugin, marginIndicatorPlugin]} />
+          }} 
+          plugins={[
+            loopOverlayPlugin, 
+            playbackIndicatorPlugin, 
+            marginIndicatorPlugin,
+            {
+              id: 'gradientOverlay',
+              afterDraw: (chart) => {
+                const ctx = chart.ctx;
+                const chartArea = chart.chartArea;
+                
+                if (zoomStateRef.current.max < xMax) {
+                  // Right gradient
+                  const gradientRight = ctx.createLinearGradient(
+                    chartArea.right - 50, 
+                    0, 
+                    chartArea.right, 
+                    0
+                  );
+                  gradientRight.addColorStop(0, 'rgba(255,255,255,0)');
+                  gradientRight.addColorStop(1, 'rgba(25, 118, 210, 0.15)');
+                  
+                  ctx.fillStyle = gradientRight;
+                  ctx.fillRect(
+                    chartArea.right - 50,
+                    chartArea.top,
+                    50,
+                    chartArea.bottom - chartArea.top
+                  );
+                }
+                
+                if (zoomStateRef.current.min > 0) {
+                  // Left gradient
+                  const gradientLeft = ctx.createLinearGradient(
+                    chartArea.left, 
+                    0, 
+                    chartArea.left + 50, 
+                    0
+                  );
+                  gradientLeft.addColorStop(0, 'rgba(25, 118, 210, 0.15)');
+                  gradientLeft.addColorStop(1, 'rgba(255,255,255,0)');
+                  
+                  ctx.fillStyle = gradientLeft;
+                  ctx.fillRect(
+                    chartArea.left,
+                    chartArea.top,
+                    50,
+                    chartArea.bottom - chartArea.top
+                  );
+                }
+              }
+            }
+          ]} 
+        />
       </div>
 
       <style>{`
