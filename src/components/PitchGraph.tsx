@@ -14,6 +14,24 @@ import {
 import type { Plugin, ChartTypeRegistry } from 'chart.js';
 import { DragController } from './DragController';
 
+// Add new type definitions for segment coloring
+interface SegmentContext {
+  p1DataIndex: number;
+  p2DataIndex: number;
+}
+
+interface SegmentOptions {
+  borderColor: string | ((ctx: SegmentContext) => string);
+  borderDash: number[] | ((ctx: SegmentContext) => number[]);
+}
+
+// Extend Chart.js dataset types to include our segment property
+declare module 'chart.js' {
+  interface LineControllerDatasetOptions {
+    segment?: SegmentOptions;
+  }
+}
+
 ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend, CategoryScale);
 
 // Define plugin options type
@@ -976,20 +994,152 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }
   }, [chartRef.current, xMax]);
 
-  const chartData = {
-    labels: times,
-    datasets: [
-      {
-        label,
-        data: pitches,
-        borderColor: color,
-        backgroundColor: 'rgba(25, 118, 210, 0.1)',
-        spanGaps: false,  // Connect across gaps to create smoother appearance
-        pointRadius: 0,
-        borderWidth: 2.5,  // Slightly thicker lines
-        tension: 0.3,    // Moderate curve tension for smooth lines
-      },
-    ],
+  const chartData = useMemo(() => {
+    // Create a modified version of pitch data that has interpolated values over gaps
+    // This will create a smooth curve with color changes
+    const smoothedData: (number | null)[] = [...pitches];
+    
+    // Define a minimum threshold for voiced speech - frequencies below this are likely unvoiced
+    const VOICED_THRESHOLD = 85; // Hz - typical minimum for human voice
+    
+    // Create an array to track which segments are actually voiced
+    // Both null values AND values below threshold are considered unvoiced
+    const isVoiced = pitches.map(p => p !== null && p > VOICED_THRESHOLD);
+    
+    // Find gaps between voiced sections and interpolate values across them
+    for (let i = 0; i < pitches.length; i++) {
+      // If the current point is null or below threshold but we need a value for display
+      if (!isVoiced[i]) {
+        // Look for previous voiced segment
+        let prevVoicedIdx = -1;
+        let prevVoicedValue = null;
+        for (let j = i - 1; j >= 0; j--) {
+          if (isVoiced[j]) {
+            prevVoicedIdx = j;
+            prevVoicedValue = pitches[j];
+            break;
+          }
+        }
+        
+        // Look for next voiced segment
+        let nextVoicedIdx = -1;
+        let nextVoicedValue = null;
+        for (let j = i + 1; j < pitches.length; j++) {
+          if (isVoiced[j]) {
+            nextVoicedIdx = j;
+            nextVoicedValue = pitches[j];
+            break;
+          }
+        }
+        
+        // If we found voiced segments on both sides, interpolate
+        if (prevVoicedIdx !== -1 && nextVoicedIdx !== -1) {
+          const gapSize = nextVoicedIdx - prevVoicedIdx;
+          const progress = (i - prevVoicedIdx) / gapSize;
+          smoothedData[i] = prevVoicedValue! + (nextVoicedValue! - prevVoicedValue!) * progress;
+        } 
+        // If only found previous voiced segment, maintain its value
+        else if (prevVoicedIdx !== -1) {
+          smoothedData[i] = prevVoicedValue;
+        }
+        // If only found next voiced segment, maintain its value
+        else if (nextVoicedIdx !== -1) {
+          smoothedData[i] = nextVoicedValue;
+        }
+        // If no voiced segments found, use a fallback value
+        else {
+          smoothedData[i] = VOICED_THRESHOLD; // Default to threshold value
+        }
+      }
+    }
+    
+    // Now we'll track voiced/unvoiced segments using our enhanced detection
+    const segmentInfo = smoothedData.map((_, i) => ({
+      value: smoothedData[i],
+      isVoiced: isVoiced[i] // Use our enhanced voiced detection
+    }));
+
+    return {
+      labels: times,
+      datasets: [
+        {
+          label,
+          data: smoothedData,
+          borderColor: color,  // Use a single color for the main line
+          backgroundColor: 'rgba(25, 118, 210, 0.1)',
+          spanGaps: true,  // Connect across gaps for smooth line
+          pointRadius: 0,
+          borderWidth: 3,  // Thicker lines for better visibility
+          tension: 0.3,    // Moderate curve tension for smooth lines
+          // Store the voicing information for our custom renderer
+          segment: {
+            borderColor: (ctx: SegmentContext) => segmentInfo[ctx.p1DataIndex]?.isVoiced ? color : '#ff6b6b',
+            borderDash: (ctx: SegmentContext) => segmentInfo[ctx.p1DataIndex]?.isVoiced ? [] : [5, 5]
+          }
+        },
+      ],
+    };
+  }, [times, pitches, color, label]);
+
+  // Create custom segment coloring plugin to handle different colors for voiced/unvoiced segments
+  const segmentColoringPlugin: Plugin<'line'> = {
+    id: 'segmentColoring',
+    afterDatasetsDraw(chart) {
+      const ctx = chart.ctx;
+      const meta = chart.getDatasetMeta(0);
+      
+      if (!meta.data || meta.data.length === 0) return;
+      
+      // Use a more specific type for the dataset
+      const dataset = chart.data.datasets[0] as unknown as {
+        borderWidth?: number;
+        segment?: SegmentOptions;
+      };
+      const segmentOptions = dataset.segment;
+      if (!segmentOptions) return;
+      
+      // Save original line settings
+      ctx.save();
+      
+      // For each segment between points
+      for (let i = 0; i < meta.data.length - 1; i++) {
+        // Get current point and next point
+        const current = meta.data[i];
+        const next = meta.data[i + 1];
+        
+        if (!current || !next) continue;
+        
+        // Use segment options to determine color and dash pattern
+        const segmentContext: SegmentContext = { p1DataIndex: i, p2DataIndex: i + 1 };
+        const color = typeof segmentOptions.borderColor === 'function' 
+          ? segmentOptions.borderColor(segmentContext) 
+          : segmentOptions.borderColor;
+        
+        const borderDash = typeof segmentOptions.borderDash === 'function'
+          ? segmentOptions.borderDash(segmentContext)
+          : segmentOptions.borderDash;
+        
+        if (!color) continue;
+        
+        // Draw line segment with specific color and dash
+        ctx.beginPath();
+        ctx.moveTo(current.x, current.y);
+        ctx.lineTo(next.x, next.y);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = dataset.borderWidth || 3;
+        
+        if (borderDash && borderDash.length) {
+          ctx.setLineDash(borderDash);
+        } else {
+          ctx.setLineDash([]);
+        }
+        
+        ctx.stroke();
+      }
+      
+      // Restore original context
+      ctx.restore();
+    }
   };
 
   // Overlay plugin for loop region
@@ -1351,6 +1501,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
             loopOverlayPlugin, 
             playbackIndicatorPlugin, 
             marginIndicatorPlugin,
+            segmentColoringPlugin,
             {
               id: 'gradientOverlay',
               afterDraw: (chart) => {
