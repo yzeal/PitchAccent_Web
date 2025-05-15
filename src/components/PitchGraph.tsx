@@ -535,6 +535,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     // Update the actual total range ref
     actualTotalRangeRef.current = newMax;
     
+    // Fix for mobile: never set a 0-1s range on initial load for long files
+    // If newMax is significantly greater than 1, always use a wider initial view
+    const shouldForceWiderInitialView = newMax > 5 && (currentViewMax - currentViewMin <= 1);
+    
     // Only update view range if: 
     // 1. This is a user recording (always show full range) OR
     // 2. This is an initial load/reset AND
@@ -542,7 +546,22 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     //    - The user is not actively interacting with the chart AND
     //    - For short recordings <= 20s: show full range
     //    - For long native recordings: respect initialViewDuration
-    if (isUserRecording || (isInitialLoadOrReset && !isJumpingToPlayback && !isUserInteractingRef.current)) {
+    // 3. OR if we need to force a wider view on mobile (0-1s bug fix)
+    if (isUserRecording || 
+        (isInitialLoadOrReset && !isJumpingToPlayback && !isUserInteractingRef.current) ||
+        shouldForceWiderInitialView) {
+        
+      // If we're fixing the 0-1s bug, log it
+      if (shouldForceWiderInitialView) {
+        console.log('[PitchGraph] Fixing restricted view range:', {
+          currentViewMin,
+          currentViewMax,
+          newMax,
+          shouldForceWiderInitialView,
+          isMobile
+        });
+      }
+      
       const updatedRange = isUserRecording || (!initialViewDuration && newMax <= 20) ? {
         min: 0,
         max: newMax
@@ -566,7 +585,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       });
       
       // Only if not jumping to playback position and this is an initial load
-      if (!isJumpingToPlayback && isInitialLoadOrReset) {
+      // OR if we're forcing a fix for the 0-1s bug
+      if ((!isJumpingToPlayback && isInitialLoadOrReset) || shouldForceWiderInitialView) {
         setTotalDataRange({ min: 0, max: newMax });
         zoomStateRef.current = { ...updatedRange };
         setViewRange(updatedRange);
@@ -592,7 +612,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       console.log('[PitchGraph] Skipping initial view setup, already viewing content or user is interacting');
       setTotalDataRange({ min: 0, max: newMax });
     }
-  }, [times, totalDuration, initialViewDuration, isUserRecording, isJumpingToPlayback]);
+  }, [times, totalDuration, initialViewDuration, isUserRecording, isJumpingToPlayback, isMobile]);
 
   // Modify handleWheel to remove artificial view range limits for user recordings
   const handleWheel = (e: WheelEvent) => {
@@ -871,6 +891,20 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       // Calculate zoom factor based on the change in distance
       const zoomFactor = newDistance / initialDistance;
       
+      // Add min/max limits for zoom factor to prevent extreme jumps that cause instability
+      // Too small zoom factors can cause jump to 0-1 range
+      const limitedZoomFactor = Math.max(0.5, Math.min(2.0, zoomFactor));
+      
+      // Log zoom operation occasionally for debugging
+      if (Math.random() < 0.05) {
+        console.log('[PitchGraph] Mobile pinch zoom:', {
+          newDistance, 
+          initialDistance,
+          rawZoomFactor: zoomFactor,
+          limitedZoomFactor
+        });
+      }
+      
       // Calculate center point of the pinch
       const centerX = (touch1.clientX + touch2.clientX) / 2;
       const rect = chart.canvas.getBoundingClientRect();
@@ -886,14 +920,58 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       
       // Calculate new range while keeping pinch center fixed
       const currentRange = currentMax - currentMin;
-      const newRange = currentRange / zoomFactor;
+      
+      // Calculate new range based on limited zoom factor
+      let newRange = currentRange / limitedZoomFactor;
+      
+      // IMPORTANT: Set minimum range to prevent "jumping" to 0-1s view
+      // This is especially important on mobile where touch events can be less precise
+      const minViewRange = 0.5; // Never allow zooming in beyond 0.5 seconds
+      
+      // Also prevent extreme zoom out that can cause view instability
+      const maxViewRange = totalDataRange.max;
+      
+      // Keep range within safe bounds
+      if (newRange < minViewRange) {
+        newRange = minViewRange;
+      } else if (newRange > maxViewRange) {
+        newRange = maxViewRange;
+      }
+      
+      // Calculate new view range position
       const mouseRatio = (mouseX - chartArea.left) / (chartArea.right - chartArea.left);
       const newMin = mouseDataX - (newRange * mouseRatio);
       const newMax = newMin + newRange;
       
-      // Apply limits
+      // Apply limits and ensure a valid range
       const finalMin = Math.max(0, newMin);
-      const finalMax = Math.min(totalDataRange.max, Math.max(finalMin + 0.5, newMax));
+      const finalMax = Math.min(totalDataRange.max, Math.max(finalMin + minViewRange, newMax));
+      
+      // IMPORTANT: Verify we're not creating a tiny or invalid range
+      // This prevents the 0-1s bug on mobile pinch zoom
+      if (finalMax - finalMin < minViewRange || 
+          finalMax <= finalMin || 
+          finalMin < 0 || 
+          finalMax > totalDataRange.max) {
+        
+        // Log the invalid view state for debugging
+        console.log('[PitchGraph] Prevented invalid view range:', {
+          finalMin,
+          finalMax,
+          totalMax: totalDataRange.max
+        });
+        
+        // Skip this update - it would create an invalid state
+        // Just update touch start reference but don't change the view
+        touchStartRef.current = {
+          x1: touch1.clientX,
+          y1: touch1.clientY,
+          x2: touch2.clientX,
+          y2: touch2.clientY,
+          distance: newDistance
+        };
+        return;
+      }
       
       // Update zoom state
       zoomStateRef.current = { min: finalMin, max: finalMax };
@@ -963,7 +1041,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           deltaValue,
           viewWidth: chartArea.right - chartArea.left,
           viewRange: xScale.max - xScale.min,
-          mobilePanMultiplier
+          mobilePanMultiplier,
+          currentView: { min: xScale.min, max: xScale.max }
         });
       }
       
@@ -983,6 +1062,25 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         // If trying to pan beyond right edge, lock to max
         newMax = totalDataRange.max;
         newMin = Math.max(0, newMax - currentRange);
+      }
+      
+      // IMPORTANT: Verify we're not creating a tiny or invalid range
+      // This prevents the 0-1s bug on mobile panning
+      const minViewRange = 0.5;
+      if (newMax - newMin < minViewRange || newMax <= newMin) {
+        // Skip this update - it would create an invalid state
+        console.log('[PitchGraph] Prevented invalid view range during pan:', {
+          newMin,
+          newMax,
+          totalMax: totalDataRange.max
+        });
+        
+        // Just update touch reference but don't change view
+        touchPanRef.current = {
+          x: touch.clientX,
+          y: touch.clientY
+        };
+        return;
       }
       
       // Update zoom state
@@ -1022,8 +1120,24 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   };
 
   const handleTouchEnd = () => {
+    // Clear touch state
     touchStartRef.current = null;
     touchPanRef.current = null;
+    
+    // Reset user interaction flags with a short delay
+    // This prevents unwanted view resets immediately after touch interaction
+    setTimeout(() => {
+      isUserInteractingRef.current = false;
+      isZoomingRef.current = false;
+    }, 300); // Slightly longer delay for touch to account for possible taps that follow
+    
+    // Add debugging log
+    console.log('[PitchGraph] Touch interaction ended, current view:', {
+      min: zoomStateRef.current.min,
+      max: zoomStateRef.current.max,
+      range: zoomStateRef.current.max - zoomStateRef.current.min,
+      totalMax: actualTotalRangeRef.current
+    });
   };
 
   // Update event listeners to include touch zoom
