@@ -1883,7 +1883,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           height: 220, /* Increased from 150 to give more vertical space */
           width: '100%',
           maxWidth: '100%',
-          paddingRight: '30px', /* Keep right padding for loop handles */
+          paddingRight: '0', /* Remove container padding but keep the chart padding */
           position: 'relative',
           overflow: 'visible', /* Ensure handles are visible outside the container */
         }}
@@ -1984,9 +1984,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
                 const chartArea = chart.chartArea;
                 
                 if (zoomStateRef.current.max < xMax) {
-                  // Right gradient
+                  // Right gradient - make it narrower
                   const gradientRight = ctx.createLinearGradient(
-                    chartArea.right - 50, 
+                    chartArea.right - 25, 
                     0, 
                     chartArea.right, 
                     0
@@ -1996,19 +1996,19 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
                   
                   ctx.fillStyle = gradientRight;
                   ctx.fillRect(
-                    chartArea.right - 50,
+                    chartArea.right - 25,
                     chartArea.top,
-                    50,
+                    25,
                     chartArea.bottom - chartArea.top
                   );
                 }
                 
                 if (zoomStateRef.current.min > 0) {
-                  // Left gradient
+                  // Left gradient - make it narrower
                   const gradientLeft = ctx.createLinearGradient(
                     chartArea.left, 
                     0, 
-                    chartArea.left + 50, 
+                    chartArea.left + 25, 
                     0
                   );
                   gradientLeft.addColorStop(0, 'rgba(25, 118, 210, 0.15)');
@@ -2018,7 +2018,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
                   ctx.fillRect(
                     chartArea.left,
                     chartArea.top,
-                    50,
+                    25,
                     chartArea.bottom - chartArea.top
                   );
                 }
@@ -2037,10 +2037,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         @media (max-width: 768px) {
           .pitch-graph-container {
             touch-action: manipulation;
-            height: 180px !important; /* Increased from 100px to give more vertical space on mobile */
-            min-height: 180px !important;
-            max-height: 180px !important;
-            padding-right: 30px !important; /* Keep right padding for loop handles */
+            height: 220px !important; /* Match desktop height */
+            min-height: 220px !important;
+            max-height: 220px !important;
+            padding-right: 0 !important; /* Remove container padding */
           }
           .pitch-graph-container::-webkit-scrollbar {
             display: none;
