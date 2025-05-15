@@ -82,6 +82,7 @@ export interface PitchGraphWithControlsProps {
       precision?: number;
     };
   };
+  isJumpingToPlayback?: boolean;
 }
 
 export type PitchGraphChartRef = Chart<'line', (number | null)[], number> | null;
@@ -109,6 +110,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     initialViewDuration,
     isUserRecording = false,
     yAxisConfig,
+    isJumpingToPlayback = false,
   } = props;
   
   const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
@@ -506,6 +508,15 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   useEffect(() => {
     // Use totalDuration as the source of truth if available
     const newMax = totalDuration || (times.length > 0 ? times[times.length - 1] : 1);
+    
+    // Get the current chart view range
+    const currentViewMin = chartRef.current?.scales?.x?.min ?? 0;
+    const currentViewMax = chartRef.current?.scales?.x?.max ?? newMax;
+    
+    // Determine if this is an initial load by checking if chart view range is at default (0 to small value)
+    // This avoids unwanted resets during regular playback after the chart is already set up
+    const isInitialLoadOrReset = currentViewMax <= 10 && currentViewMin === 0;
+    
     console.log('[PitchGraph] Updating total data range:', {
         oldRange: totalDataRange,
         newMax,
@@ -515,52 +526,73 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         isUserInteracting: isUserInteractingRef.current,
         currentZoomState: { ...zoomStateRef.current },
         isUserRecording,
+        isJumpingToPlayback,
+        currentView: { min: currentViewMin, max: currentViewMax },
+        isInitialLoadOrReset,
         explicitLastPoint: times[times.length - 1]
     });
     
     // Update the actual total range ref
     actualTotalRangeRef.current = newMax;
     
-    // For user recordings, always show the full range immediately
-    const updatedRange = isUserRecording || (!initialViewDuration && newMax <= 20) ? {
-      min: 0,
-      max: newMax
-    } : initialViewDuration ? {
-      min: 0,
-      max: Math.min(initialViewDuration, newMax)
-    } : {
-      min: 0,
-      max: newMax
-    };
-    
-    console.log('[PitchGraph] Setting initial view range:', {
-      updatedRange,
-      initialViewDuration,
-      totalDuration: newMax,
-      isUserRecording,
-      timePointsCount: times.length,
-      finalRangeMin: updatedRange.min,
-      finalRangeMax: updatedRange.max
-    });
-    
-    setTotalDataRange({ min: 0, max: newMax });
-    zoomStateRef.current = { ...updatedRange };
-    setViewRange(updatedRange);
-    
-    // Update chart if it exists
-    if (chartRef.current) {
-      if (chartRef.current.options.scales?.x) {
-        console.log('[PitchGraph] Directly setting chart scales:', {
-          min: updatedRange.min,
-          max: updatedRange.max,
-          totalDataRangeMax: newMax
-        });
-        chartRef.current.options.scales.x.min = updatedRange.min;
-        chartRef.current.options.scales.x.max = updatedRange.max;
+    // Only update view range if: 
+    // 1. This is a user recording (always show full range) OR
+    // 2. This is an initial load/reset AND
+    //    - This is NOT a jump-to-playback operation AND
+    //    - The user is not actively interacting with the chart AND
+    //    - For short recordings <= 20s: show full range
+    //    - For long native recordings: respect initialViewDuration
+    if (isUserRecording || (isInitialLoadOrReset && !isJumpingToPlayback && !isUserInteractingRef.current)) {
+      const updatedRange = isUserRecording || (!initialViewDuration && newMax <= 20) ? {
+        min: 0,
+        max: newMax
+      } : initialViewDuration ? {
+        min: 0,
+        max: Math.min(initialViewDuration, newMax)
+      } : {
+        min: 0,
+        max: newMax
+      };
+      
+      console.log('[PitchGraph] Setting initial view range:', {
+        updatedRange,
+        initialViewDuration,
+        totalDuration: newMax,
+        isUserRecording,
+        isJumpingToPlayback,
+        timePointsCount: times.length,
+        finalRangeMin: updatedRange.min,
+        finalRangeMax: updatedRange.max
+      });
+      
+      // Only if not jumping to playback position and this is an initial load
+      if (!isJumpingToPlayback && isInitialLoadOrReset) {
+        setTotalDataRange({ min: 0, max: newMax });
+        zoomStateRef.current = { ...updatedRange };
+        setViewRange(updatedRange);
+        
+        // If we have a chart, update it directly too
+        if (chartRef.current && chartRef.current.options.scales?.x) {
+          console.log('[PitchGraph] Directly setting chart scales:', {
+            min: updatedRange.min,
+            max: updatedRange.max,
+            totalDataRangeMax: newMax
+          });
+          
+          chartRef.current.options.scales.x.min = updatedRange.min;
+          chartRef.current.options.scales.x.max = updatedRange.max;
+          chartRef.current.update('none');
+        }
+      } else {
+        console.log('[PitchGraph] Skipping view range reset: not initial load or jump in progress');
+        // Still update the total data range, but don't change the view
+        setTotalDataRange({ min: 0, max: newMax });
       }
-      chartRef.current.update('none');
+    } else {
+      console.log('[PitchGraph] Skipping initial view setup, already viewing content or user is interacting');
+      setTotalDataRange({ min: 0, max: newMax });
     }
-  }, [totalDuration, initialViewDuration, times, isUserRecording]);
+  }, [times, totalDuration, initialViewDuration, isUserRecording, isJumpingToPlayback]);
 
   // Modify handleWheel to remove artificial view range limits for user recordings
   const handleWheel = (e: WheelEvent) => {
