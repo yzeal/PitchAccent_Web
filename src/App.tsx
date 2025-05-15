@@ -1056,7 +1056,9 @@ const App: React.FC = () => {
                   <span style={{ fontSize: 12, flex: 1 }}>{loopStart.toFixed(2)}s - {loopEnd.toFixed(2)}s</span>
                   <button
                     onClick={() => {
-                      const duration = nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0;
+                      // Get accurate duration from PitchDataManager, otherwise fall back to pitch data
+                      const duration = pitchManager.current.getTotalDuration() || 
+                        (nativePitchData.times.length > 0 ? nativePitchData.times[nativePitchData.times.length - 1] : 0);
                       userSetLoopRef.current = null;
                       console.log('[App] Clearing user-set loop region');
                       setLoopStartWithLogging(0);
