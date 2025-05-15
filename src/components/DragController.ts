@@ -50,7 +50,7 @@ export class DragController {
     this.loopStart = options.loopStart;
     this.loopEnd = options.loopEnd;
     this.edgeThresholdPixels = options.edgeThresholdPixels || 10;
-    this.marginThresholdPixels = options.marginThresholdPixels || 40;
+    this.marginThresholdPixels = options.marginThresholdPixels || 30;
     this.maxDragLimit = options.maxDragLimit || Infinity;
     this.dragState.visualStart = this.loopStart;
     this.dragState.visualEnd = this.loopEnd;

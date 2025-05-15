@@ -69,7 +69,7 @@ export interface PitchGraphWithControlsProps {
   onChartReady?: (chart: Chart<'line', (number | null)[], number> | null) => void;
   onLoopChange?: (start: number, end: number) => void;
   onViewChange?: (startTime: number, endTime: number, loopStart?: number, loopEnd?: number) => void;
-  showNavigationHints?: boolean;
+  showNavigationHints?: boolean; // Add prop but we won't use it (visual hints are disabled)
   totalDuration?: number;
   initialViewDuration?: number;
   isUserRecording?: boolean;
@@ -105,7 +105,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     onChartReady,
     onLoopChange,
     onViewChange,
-    showNavigationHints = false,
     totalDuration,
     initialViewDuration,
     isUserRecording = false,
@@ -1511,16 +1510,16 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         ctx.fillRect(
           chartArea.right,
           chartArea.top,
-          40,
+          30, // Match our 30px right padding
           chartArea.bottom - chartArea.top
         );
         
         // Draw arrow pointing left
         ctx.fillStyle = 'rgba(0, 0, 255, 0.7)';
         ctx.beginPath();
-        ctx.moveTo(chartArea.right + 25, chartArea.top + (chartArea.bottom - chartArea.top) / 2 - 10);
+        ctx.moveTo(chartArea.right + 20, chartArea.top + (chartArea.bottom - chartArea.top) / 2 - 10); // Adjusted for 30px width
         ctx.lineTo(chartArea.right + 5, chartArea.top + (chartArea.bottom - chartArea.top) / 2);
-        ctx.lineTo(chartArea.right + 25, chartArea.top + (chartArea.bottom - chartArea.top) / 2 + 10);
+        ctx.lineTo(chartArea.right + 20, chartArea.top + (chartArea.bottom - chartArea.top) / 2 + 10); // Adjusted for 30px width
         ctx.closePath();
         ctx.fill();
       }
@@ -1593,7 +1592,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       if (chartRef.current) {
         const chartArea = chartRef.current.chartArea;
         setShowLeftMargin(x < chartArea.left && x >= chartArea.left - 40);
-        setShowRightMargin(x > chartArea.right && x <= chartArea.right + 40);
+        setShowRightMargin(x > chartArea.right && x <= chartArea.right + 30); // Use 30px to match our right padding
       }
       
       canvas.setAttribute('data-last-event', JSON.stringify({ 
@@ -1874,76 +1873,105 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         width: '100%',
         background: '#fff',
         borderRadius: 8,
-        padding: 8,
-        marginBottom: 24,
+        padding: 0, // Remove padding
+        marginBottom: 16, // Reduce bottom margin
         position: 'relative',
       }}
     >
-      {showNavigationHints && (
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          marginBottom: 8,
-          fontSize: '0.8rem',
-          color: '#666',
-        }}>
-          <div style={{ display: 'flex', gap: 16 }}>
-            {isMobile ? (
-              <>
-                <span>🤏 Pinch to zoom</span>
-                <span>👆 Drag to pan</span>
-              </>
-            ) : (
-              <>
-                <span>🖱️ Mouse wheel to zoom</span>
-                <span>👆 Drag to pan</span>
-              </>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              onClick={handleResetZoom}
-              title="Reset Zoom"
-              style={{
-                padding: '2px 6px',
-                borderRadius: '50%',
-                border: 'none',
-                background: 'transparent',
-                color: '#1976d2',
-                fontSize: '1.1rem',
-                cursor: 'pointer',
-                minWidth: 0,
-                minHeight: 0,
-                lineHeight: 1,
-              }}
-            >
-              ↺
-            </button>
-          </div>
-        </div>
-      )}
-
       <div
         style={{
-          height: 150,
+          height: 220, /* Increased from 150 to give more vertical space */
           width: '100%',
           maxWidth: '100%',
-          paddingRight: '0px',
+          paddingRight: '30px', /* Keep right padding for loop handles */
           position: 'relative',
+          overflow: 'visible', /* Ensure handles are visible outside the container */
         }}
         className="pitch-graph-container"
       >
+        {/* Add floating reset zoom button */}
+        <button
+          onClick={handleResetZoom}
+          title="Reset Zoom"
+          style={{
+            position: 'absolute',
+            top: 5,
+            right: 5,
+            zIndex: 10,
+            padding: '1px 6px',
+            borderRadius: '50%',
+            border: 'none',
+            background: 'rgba(255, 255, 255, 0.8)',
+            color: '#1976d2',
+            fontSize: '1.1rem',
+            cursor: 'pointer',
+            minWidth: 0,
+            minHeight: 0,
+            lineHeight: 1,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          ↺
+        </button>
+        
         <Line 
           ref={chartRef} 
           data={chartData} 
           options={{
             ...options,
+            maintainAspectRatio: false,
             layout: {
               padding: {
-                right: 30
+                left: 0,
+                right: 30, // Keep right padding for loop handles
+                top: 0,
+                bottom: 0
+              }
+            },
+            // Make the chart use more vertical space
+            scales: {
+              ...options.scales,
+              y: {
+                ...options.scales?.y,
+                afterFit: (scaleInstance) => {
+                  // Increase the height that the y-axis takes up
+                  scaleInstance.width = 35; // Narrow axis width to save space
+                },
+                ticks: {
+                  ...options.scales?.y?.ticks,
+                  padding: 0, // Remove padding
+                  font: {
+                    size: 9, // Smaller font size
+                  }
+                },
+                grid: {
+                  drawTicks: false,
+                  tickLength: 0,
+                }
+              },
+              x: {
+                ...options.scales?.x,
+                afterFit: (scaleInstance) => {
+                  // Reduce the height that the x-axis takes up
+                  scaleInstance.height = 15; // Smaller axis height
+                },
+                ticks: {
+                  ...options.scales?.x?.ticks,
+                  padding: 0, // Remove padding
+                  font: {
+                    size: 9, // Smaller font size
+                  }
+                },
+                grid: {
+                  drawTicks: false,
+                  tickLength: 0,
+                }
               }
             }
-          }} 
+          }}
           plugins={[
             loopOverlayPlugin, 
             playbackIndicatorPlugin, 
@@ -2009,10 +2037,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         @media (max-width: 768px) {
           .pitch-graph-container {
             touch-action: manipulation;
-            height: 100px !important;
-            min-height: 100px !important;
-            max-height: 100px !important;
-            padding-right: 0px !important;
+            height: 180px !important; /* Increased from 100px to give more vertical space on mobile */
+            min-height: 180px !important;
+            max-height: 180px !important;
+            padding-right: 30px !important; /* Keep right padding for loop handles */
           }
           .pitch-graph-container::-webkit-scrollbar {
             display: none;
@@ -2020,6 +2048,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           .pitch-graph-container {
             -ms-overflow-style: none;
             scrollbar-width: none;
+          }
+          /* Make chart elements bigger for touch devices */
+          .pitch-graph-container canvas {
+            width: 100% !important;
+            height: 100% !important;
           }
         }
       `}</style>

@@ -23,4 +23,57 @@ For the best experience with the Pitch Accent Training app, consider these guide
 - Practice the same segment multiple times rather than recording longer passages
 
 ### Technical Considerations
-While there is no hard limit on recording length, browser performance may degrade with very long recordings, especially on mobile devices. The app has been optimized for recordings in the 5-30 second range, which is ideal for focused practice. 
+While there is no hard limit on recording length, browser performance may degrade with very long recordings, especially on mobile devices. The app has been optimized for recordings in the 5-30 second range, which is ideal for focused practice.
+
+# Japanese Pitch Accent Visualization - User Guide
+
+## Navigation and Zoom Controls
+
+### Desktop Controls
+
+- **Mouse wheel**: Zoom in/out on the pitch curve
+- **Click and drag**: Pan the view horizontally when zoomed in
+- **↺ button**: Reset zoom to show the full content
+- **Loop visible button**: Set the playback loop to match the visible area
+
+### Mobile Controls
+
+- **Pinch gesture**: Zoom in/out on the pitch curve
+- **Single finger drag**: Pan the view horizontally when zoomed in
+- **↺ button**: Reset zoom to show the full content
+- **Loop visible button**: Set the playback loop to match the visible area
+
+### Additional Features
+
+- **Auto-loop checkbox**: When enabled, the loop region will automatically match the visible area when you pan or zoom
+- **Loop delay**: Adjusts the pause time (in milliseconds) between loop repetitions
+- **Jump to playback**: Jumps the view to center around the current playback position (only available for long videos)
+
+## Tips for Effective Practice
+
+1. **Compare native and your recordings**:
+   - Load a native recording using the "Load Native Recording" button
+   - Record your own voice using the microphone button
+   - Visually compare your pitch pattern with the native speaker
+   
+2. **Focus on specific segments**:
+   - Zoom in on challenging parts of the utterance
+   - Set a tight loop region around difficult pitch patterns
+   - Adjust the loop delay if needed to give yourself time to repeat
+   
+3. **Mobile-specific tips**:
+   - Hold your device in landscape orientation for better visualization
+   - Use small, deliberate pinch gestures for precise zooming
+   - Tap the reset zoom button (↺) if you get lost
+
+## Pitch Visualization Details
+
+The pitch visualization shows the fundamental frequency (pitch) of the voice over time:
+
+- **Blue line**: Your recorded voice
+- **Green line**: Native speaker's voice
+- **Solid lines**: Voiced speech segments (vowels, voiced consonants)
+- **Dashed lines**: Transitions or less reliable pitch segments
+- **Vertical red line**: Current playback position
+
+The y-axis shows frequency in Hertz (Hz), typically ranging from 50-500 Hz, with male voices generally lower (80-180 Hz) and female voices higher (160-300 Hz). 
