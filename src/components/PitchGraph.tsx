@@ -250,7 +250,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         },
       },
       elements: {
-        line: { tension: 0.2 },
+        line: { 
+          tension: 0.3,  // Moderate tension for smooth curves
+          capBezierPoints: true  // Improve curve quality at endpoints
+        },
       },
     });
   }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max, yAxisConfig]);
@@ -981,9 +984,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         data: pitches,
         borderColor: color,
         backgroundColor: 'rgba(25, 118, 210, 0.1)',
-        spanGaps: false,
+        spanGaps: false,  // Connect across gaps to create smoother appearance
         pointRadius: 0,
-        borderWidth: 2,
+        borderWidth: 2.5,  // Slightly thicker lines
+        tension: 0.3,    // Moderate curve tension for smooth lines
       },
     ],
   };

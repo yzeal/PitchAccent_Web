@@ -25,6 +25,44 @@ function medianFilter(arr: (number | null)[], windowSize: number): (number | nul
   return result
 }
 
+// Enhanced smoothing for pitch data to create more simplified curves
+function smoothPitch(pitches: (number | null)[], windowSize = 25): (number | null)[] {
+  // First apply a strong median filter to remove outliers and noise
+  const medianSmoothed = medianFilter(pitches, windowSize);
+  
+  // Then apply a moving average to create smoother transitions
+  const result: (number | null)[] = [];
+  const halfWindow = Math.floor(windowSize / 2);
+  
+  for (let i = 0; i < medianSmoothed.length; i++) {
+    if (medianSmoothed[i] === null) {
+      result.push(null);
+      continue;
+    }
+    
+    let sum = 0;
+    let count = 0;
+    
+    // Calculate weighted moving average
+    for (let j = Math.max(0, i - halfWindow); j <= Math.min(medianSmoothed.length - 1, i + halfWindow); j++) {
+      if (medianSmoothed[j] !== null) {
+        // Apply weight based on distance from center point (gaussian-like)
+        const weight = 1 - Math.abs(i - j) / (halfWindow + 1);
+        sum += (medianSmoothed[j] as number) * weight;
+        count += weight;
+      }
+    }
+    
+    if (count > 0) {
+      result.push(sum / count);
+    } else {
+      result.push(medianSmoothed[i]);
+    }
+  }
+  
+  return result;
+}
+
 const MIN_PITCH = 60
 const MAX_PITCH = 500
 const MIN_CLARITY = 0.8
@@ -172,9 +210,18 @@ const App: React.FC = () => {
       try {
         console.log('[App] Initializing PitchDataManager with audio file:', file.name);
         await pitchManager.current.initialize(file);
+        
+        // Get initial pitch data
         const initialData = pitchManager.current.getPitchDataForTimeRange(0, 30);
-        console.log('[App] Initial pitch data loaded:', initialData);
-        setNativePitchData(initialData);
+        
+        // Apply enhanced smoothing for a more simplified curve
+        const enhancedData = {
+          times: initialData.times,
+          pitches: smoothPitch(initialData.pitches, 25)
+        };
+        
+        console.log('[App] Initial pitch data loaded and smoothed');
+        setNativePitchData(enhancedData);
       } catch (error) {
         console.error('Error processing audio:', error);
         setNativePitchData({ times: [], pitches: [] });
@@ -184,9 +231,18 @@ const App: React.FC = () => {
       try {
         console.log('[App] Initializing PitchDataManager with video file:', file.name);
         await pitchManager.current.initialize(file);
+        
+        // Get initial pitch data
         const initialData = pitchManager.current.getPitchDataForTimeRange(0, 30);
-        console.log('[App] Initial pitch data loaded:', initialData);
-        setNativePitchData(initialData);
+        
+        // Apply enhanced smoothing for a more simplified curve
+        const enhancedData = {
+          times: initialData.times,
+          pitches: smoothPitch(initialData.pitches, 25)
+        };
+        
+        console.log('[App] Initial pitch data loaded and smoothed');
+        setNativePitchData(enhancedData);
       } catch (error) {
         console.error('Error processing video:', error);
         setNativePitchData({ times: [], pitches: [] });
@@ -229,11 +285,17 @@ const App: React.FC = () => {
           }
           times.push(i / sampleRate);
         }
-        const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
-        setUserPitchData({ times, pitches: smoothed });
+        
+        // First apply basic median filter
+        const basicSmoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+        
+        // Then apply enhanced smoothing for simplified curves
+        const enhancedSmooth = smoothPitch(basicSmoothed, 25);
+        
+        setUserPitchData({ times, pitches: enhancedSmooth });
         
         // Calculate the initial range for user pitch data when extracted
-        const [minPitch, maxPitch] = calculateInitialPitchRange(smoothed);
+        const [minPitch, maxPitch] = calculateInitialPitchRange(enhancedSmooth);
         
         // Use the same y-axis range for user data as we do for native data
         // This makes it easier to compare the two
@@ -295,9 +357,18 @@ const App: React.FC = () => {
       try {
         console.log('[App] Initializing PitchDataManager with audio file:', file.name);
         await pitchManager.current.initialize(file);
+        
+        // Get initial pitch data
         const initialData = pitchManager.current.getPitchDataForTimeRange(0, 30);
-        console.log('[App] Initial pitch data loaded:', initialData);
-        setNativePitchData(initialData);
+        
+        // Apply enhanced smoothing for a more simplified curve
+        const enhancedData = {
+          times: initialData.times,
+          pitches: smoothPitch(initialData.pitches, 25)
+        };
+        
+        console.log('[App] Initial pitch data loaded and smoothed');
+        setNativePitchData(enhancedData);
       } catch (error) {
         console.error('Error processing audio:', error);
         setNativePitchData({ times: [], pitches: [] });
@@ -307,9 +378,18 @@ const App: React.FC = () => {
       try {
         console.log('[App] Initializing PitchDataManager with video file:', file.name);
         await pitchManager.current.initialize(file);
+        
+        // Get initial pitch data
         const initialData = pitchManager.current.getPitchDataForTimeRange(0, 30);
-        console.log('[App] Initial pitch data loaded:', initialData);
-        setNativePitchData(initialData);
+        
+        // Apply enhanced smoothing for a more simplified curve
+        const enhancedData = {
+          times: initialData.times,
+          pitches: smoothPitch(initialData.pitches, 25)
+        };
+        
+        console.log('[App] Initial pitch data loaded and smoothed');
+        setNativePitchData(enhancedData);
       } catch (error) {
         console.error('Error processing video:', error);
         setNativePitchData({ times: [], pitches: [] });

@@ -50,6 +50,44 @@ function medianFilter(arr: (number | null)[], windowSize: number): (number | nul
   return result;
 }
 
+// Enhanced smoothing for pitch data to create more simplified curves
+function smoothPitch(pitches: (number | null)[], windowSize = 25): (number | null)[] {
+  // First apply a strong median filter to remove outliers and noise
+  const medianSmoothed = medianFilter(pitches, windowSize);
+  
+  // Then apply a moving average to create smoother transitions
+  const result: (number | null)[] = [];
+  const halfWindow = Math.floor(windowSize / 2);
+  
+  for (let i = 0; i < medianSmoothed.length; i++) {
+    if (medianSmoothed[i] === null) {
+      result.push(null);
+      continue;
+    }
+    
+    let sum = 0;
+    let count = 0;
+    
+    // Calculate weighted moving average
+    for (let j = Math.max(0, i - halfWindow); j <= Math.min(medianSmoothed.length - 1, i + halfWindow); j++) {
+      if (medianSmoothed[j] !== null) {
+        // Apply weight based on distance from center point (gaussian-like)
+        const weight = 1 - Math.abs(i - j) / (halfWindow + 1);
+        sum += (medianSmoothed[j] as number) * weight;
+        count += weight;
+      }
+    }
+    
+    if (count > 0) {
+      result.push(sum / count);
+    } else {
+      result.push(medianSmoothed[i]);
+    }
+  }
+  
+  return result;
+}
+
 export class PitchDataManager {
   private segments: Map<number, PitchSegment> = new Map();
   private config: ProgressiveLoadingConfig;
@@ -183,8 +221,13 @@ export class PitchDataManager {
       }
     }
 
-    const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
-    return { times, pitches: smoothed };
+    // Apply standard median filter first
+    const medianSmoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+    
+    // Then apply enhanced smoothing for more simplified curves
+    const enhancedSmooth = smoothPitch(medianSmoothed, 25);
+    
+    return { times, pitches: enhancedSmooth };
   }
 
   private initializeSegments() {
@@ -330,7 +373,11 @@ export class PitchDataManager {
         }
       }
 
-      const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+      // Apply standard median filter first
+      const medianSmoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
+      
+      // Then apply enhanced smoothing for more simplified curves
+      const enhancedSmooth = smoothPitch(medianSmoothed, 25);
       
       console.log(`[PitchDataManager] Segment ${segmentIndex} processed: ${pitches.length} points`);
       
@@ -338,7 +385,7 @@ export class PitchDataManager {
       this.segments.set(segmentIndex, {
         ...segment,
         times,
-        pitches: smoothed,
+        pitches: enhancedSmooth,
         isProcessed: true
       });
     } catch (error: unknown) {
