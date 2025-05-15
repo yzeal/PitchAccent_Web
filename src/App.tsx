@@ -392,6 +392,9 @@ const App: React.FC = () => {
   // Add ref to track initial setup
   const initialSetupDoneRef = useRef(false);
 
+  // Add a ref to track if we're currently executing a jump to playback action
+  const isJumpingToPlaybackRef = useRef(false);
+
   // Update handleViewChange to show loading indicator
   const handleViewChange = useCallback(async (startTime: number, endTime: number, preservedLoopStart?: number, preservedLoopEnd?: number) => {
     // Clear any pending timeout
@@ -420,6 +423,7 @@ const App: React.FC = () => {
       currentLoopEnd: loopEnd,
       userSetLoop,
       isLoadingNewFile: isLoadingNewFileRef.current,
+      isJumpingToPlayback: isJumpingToPlaybackRef.current,
       stack: new Error().stack?.split('\n').slice(1, 3).join('\n')
     });
 
@@ -463,7 +467,8 @@ const App: React.FC = () => {
             currentLoopStart: loopStart,
             currentLoopEnd: loopEnd,
             userSetLoop,
-            isLoadingNewFile: isLoadingNewFileRef.current
+            isLoadingNewFile: isLoadingNewFileRef.current,
+            isJumpingToPlayback: isJumpingToPlaybackRef.current
           });
           
           // For initial load of long videos, force loading only first segment
@@ -498,7 +503,8 @@ const App: React.FC = () => {
             setNativePitchData(visibleData);
             
             // Only check and restore loop region if we're not loading a new file
-            if (!isLoadingNewFileRef.current) {
+            // and we're not doing a jump to playback operation
+            if (!isLoadingNewFileRef.current && !isJumpingToPlaybackRef.current) {
               // Ensure loop region is still correct after data loading
               // First check for userSetLoop, which takes highest priority
               if (userSetLoop) {
@@ -513,7 +519,7 @@ const App: React.FC = () => {
               }
               // Then check for preserved values
               else if (Math.abs(loopStart - loopRegionToRestore.start) > 0.001 || 
-                       Math.abs(loopEnd - loopRegionToRestore.end) > 0.001) {
+                      Math.abs(loopEnd - loopRegionToRestore.end) > 0.001) {
                 console.log('[App] Re-applying preserved loop region after data loading:', {
                   current: { start: loopStart, end: loopEnd },
                   preserved: loopRegionToRestore
@@ -521,6 +527,8 @@ const App: React.FC = () => {
                 setLoopStartWithLogging(loopRegionToRestore.start);
                 setLoopEndWithLogging(loopRegionToRestore.end);
               }
+            } else if (isJumpingToPlaybackRef.current) {
+              console.log('[App] Skipping loop region restoration - jump to playback in progress');
             } else {
               console.log('[App] Skipping loop region restoration - loading new file');
             }
@@ -1073,6 +1081,9 @@ const App: React.FC = () => {
       autoLoopEnabled
     });
     
+    // Set flag to indicate we're initiating a jump to playback action
+    isJumpingToPlaybackRef.current = true;
+    
     // First, set loading state to indicate we're changing view
     setIsLoadingPitchData(true);
     
@@ -1123,6 +1134,11 @@ const App: React.FC = () => {
       
       // Clear loading state
       setIsLoadingPitchData(false);
+      
+      // Clear the jump to playback flag after a slightly longer delay to ensure all data loading is complete
+      setTimeout(() => {
+        isJumpingToPlaybackRef.current = false;
+      }, 1000); // Ensure this is longer than any data loading operations
     }, 500); // Increased timeout to ensure data is loaded
   };
 
