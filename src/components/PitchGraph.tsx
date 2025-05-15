@@ -871,7 +871,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     lastMouseXRef.current = null;
   };
 
-  // Modify touch handlers to support both pan and zoom
+  // Improve touchStart to better handle pinch-to-zoom
   const handleTouchStart = (e: TouchEvent) => {
     if (dragControllerRef.current?.isDragging()) return;
     
@@ -888,7 +888,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     console.log('[PitchGraph] Touch start, current view:', {
       min: currentValidRange.min,
       max: currentValidRange.max,
-      range: currentValidRange.max - currentValidRange.min
+      range: currentValidRange.max - currentValidRange.min,
+      touchCount: e.touches.length
     });
     
     if (e.touches.length === 2) {
@@ -897,12 +898,21 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
       
+      // Store initial touch positions and distance
+      const initialDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
+      
+      // IMPROVEMENT: Add minimum distance check to avoid accidental pinches
+      if (initialDistance < 30) {
+        console.log('[PitchGraph] Ignoring pinch with small initial distance:', initialDistance);
+        return;
+      }
+      
       touchStartRef.current = {
         x1: touch1.clientX,
         y1: touch1.clientY,
         x2: touch2.clientX,
         y2: touch2.clientY,
-        distance: Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY)
+        distance: initialDistance
       };
       touchPanRef.current = null; // Clear any existing pan state
     } else if (e.touches.length === 1) {
@@ -949,74 +959,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     }, 50); // Check shortly after touch start
   };
 
-  // Add a utility function to validate and correct view ranges
-  const validateAndCorrectViewRange = (range: { min: number; max: number }) => {
-    const totalRange = actualTotalRangeRef.current;
-    
-    // Check if the range is too small for the content
-    const isTooSmall = (range.max - range.min <= 1) && (totalRange > 5);
-    
-    // Check if the range is invalid
-    const isInvalid = range.min < 0 || range.max > totalRange || range.min >= range.max;
-    
-    if (isTooSmall || isInvalid) {
-      // Create a safe default range
-      const safeRange = { 
-        min: 0, 
-        max: Math.min(10, totalRange)
-      };
-      
-      console.log('[PitchGraph] Correcting invalid view range:', {
-        originalRange: range,
-        correctedRange: safeRange,
-        reason: isTooSmall ? 'too small' : 'invalid values',
-        totalRange
-      });
-      
-      return safeRange;
-    }
-    
-    return range;
-  };
-
-  // Add an effect to regularly check for and fix invalid view ranges
-  useEffect(() => {
-    // Don't run this validation during user interaction
-    if (isUserInteractingRef.current || isZoomingRef.current || isPanningRef.current) {
-      return;
-    }
-    
-    const currentRange = {
-      min: zoomStateRef.current.min,
-      max: zoomStateRef.current.max
-    };
-    
-    // Check for the specific 0-1s bug on longer content
-    const hasSmallViewBug = 
-      currentRange.max - currentRange.min <= 1 && 
-      actualTotalRangeRef.current > 5;
-    
-    if (hasSmallViewBug) {
-      console.log('[PitchGraph] Fixed 0-1s view range bug after update:', {
-        buggyRange: currentRange,
-        totalMax: actualTotalRangeRef.current
-      });
-      
-      // Apply the safe range
-      const safeRange = validateAndCorrectViewRange(currentRange);
-      zoomStateRef.current = { ...safeRange };
-      setViewRange(safeRange);
-      
-      // Update chart directly
-      if (chartRef.current && chartRef.current.options.scales?.x) {
-        chartRef.current.options.scales.x.min = safeRange.min;
-        chartRef.current.options.scales.x.max = safeRange.max;
-        chartRef.current.update('none');
-      }
-    }
-  }, [chartRef.current?.scales?.x?.min, chartRef.current?.scales?.x?.max, isMobile]);
-  
-  // Use the validation function in touchMove to further safeguard against the 0-1s bug
+  // Improve touchMove to handle pinch zoom more reliably
   const handleTouchMove = (e: TouchEvent) => {
     const chart = chartRef.current;
     if (!chart || dragControllerRef.current?.isDragging()) return;
@@ -1058,20 +1001,26 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const newDistance = Math.hypot(touch2.clientX - touch1.clientX, touch2.clientY - touch1.clientY);
       const initialDistance = touchStartRef.current.distance!;
       
+      // Skip extremely small movements to avoid jitter
+      if (Math.abs(newDistance - initialDistance) < 5) {
+        return;
+      }
+      
       // Calculate zoom factor based on the change in distance
       const zoomFactor = newDistance / initialDistance;
       
-      // Add min/max limits for zoom factor to prevent extreme jumps that cause instability
+      // Add stronger min/max limits for zoom factor to prevent extreme jumps
       // Too small zoom factors can cause jump to 0-1 range
-      const limitedZoomFactor = Math.max(0.5, Math.min(2.0, zoomFactor));
+      const limitedZoomFactor = Math.max(0.7, Math.min(1.5, zoomFactor));
       
       // Log zoom operation occasionally for debugging
-      if (Math.random() < 0.05) {
+      if (Math.random() < 0.1) {
         console.log('[PitchGraph] Mobile pinch zoom:', {
           newDistance, 
           initialDistance,
           rawZoomFactor: zoomFactor,
-          limitedZoomFactor
+          limitedZoomFactor,
+          currentView: { ...zoomStateRef.current }
         });
       }
       
@@ -1089,10 +1038,13 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const chartArea = chart.chartArea;
       
       // Calculate new range while keeping pinch center fixed
-      const currentRange = currentMax - currentMin;
+      const currentViewRange = currentMax - currentMin;
       
-      // Calculate new range based on limited zoom factor
-      let newRange = currentRange / limitedZoomFactor;
+      // Calculate new range based on limited zoom factor - use smaller changes
+      // This helps prevent dramatic changes on mobile that can disorient
+      const zoomMultiplier = 0.7; // Make zoom less aggressive
+      const scaledZoomFactor = 1 + ((limitedZoomFactor - 1) * zoomMultiplier);
+      let newRange = currentViewRange / scaledZoomFactor;
       
       // IMPORTANT: Set minimum range to prevent "jumping" to 0-1s view
       // This is especially important on mobile where touch events can be less precise
@@ -1106,6 +1058,16 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         newRange = minViewRange;
       } else if (newRange > maxViewRange) {
         newRange = maxViewRange;
+      }
+      
+      // Keep the amount we can change in a single pinch limited
+      const maxChange = currentViewRange * 0.4; // Max 40% change per pinch
+      if (Math.abs(newRange - currentViewRange) > maxChange) {
+        if (newRange < currentViewRange) {
+          newRange = currentViewRange - maxChange; // Zooming in
+        } else {
+          newRange = currentViewRange + maxChange; // Zooming out
+        }
       }
       
       // Calculate new view range position
@@ -1183,7 +1145,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         distance: newDistance
       };
     } else if (e.touches.length === 1 && touchPanRef.current) {
-      // Single-touch pan move
+      // Single-touch pan move 
       const touch = e.touches[0];
       
       // Get current loop values from our ref, not from the chart
@@ -1825,6 +1787,124 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     
     return { min: newMin, max: newMax };
   };
+
+  // Add a secondary initialization check that runs after component mount
+  useEffect(() => {
+    // This is a safeguard that runs AFTER initial render
+    // It helps fix the 0-1s issue on the very first load with empty cache
+    const timer = setTimeout(() => {
+      // Don't run if user is already interacting
+      if (isUserInteractingRef.current || !chartRef.current) return;
+      
+      const currentMin = zoomStateRef.current.min;
+      const currentMax = zoomStateRef.current.max;
+      const totalRange = actualTotalRangeRef.current;
+      
+      // Check for the specific 0-1s bug
+      const hasSmallViewBug = 
+        currentMax - currentMin <= 1 && 
+        totalRange > 2;  // Use a smaller threshold for short videos
+      
+      console.log('[PitchGraph] Delayed initialization check:', {
+        currentView: { min: currentMin, max: currentMax },
+        totalRange,
+        hasSmallViewBug,
+        isUserInteracting: isUserInteractingRef.current
+      });
+      
+      if (hasSmallViewBug) {
+        console.log('[PitchGraph] FIXING 0-1s VIEW RANGE ON INITIAL LOAD');
+        
+        // For short videos, use the full range
+        const newRange = { min: 0, max: totalRange };
+        
+        // Update zoom state
+        zoomStateRef.current = { ...newRange };
+        setViewRange(newRange);
+        
+        // Update chart directly
+        if (chartRef.current && chartRef.current.options.scales?.x) {
+          chartRef.current.options.scales.x.min = newRange.min;
+          chartRef.current.options.scales.x.max = newRange.max;
+          chartRef.current.update('none');
+        }
+        
+        // Notify parent
+        if (onViewChange) {
+          onViewChange(newRange.min, newRange.max);
+        }
+      }
+    }, 300); // Short delay after initial render
+    
+    return () => clearTimeout(timer);
+  }, [totalDuration, isUserRecording]); // Only run on totalDuration changes
+
+  // Add a utility function to validate and correct view ranges
+  const validateAndCorrectViewRange = (range: { min: number; max: number }) => {
+    const totalRange = actualTotalRangeRef.current;
+    
+    // Check if the range is too small for the content
+    const isTooSmall = (range.max - range.min <= 1) && (totalRange > 5);
+    
+    // Check if the range is invalid
+    const isInvalid = range.min < 0 || range.max > totalRange || range.min >= range.max;
+    
+    if (isTooSmall || isInvalid) {
+      // Create a safe default range
+      const safeRange = { 
+        min: 0, 
+        max: Math.min(10, totalRange)
+      };
+      
+      console.log('[PitchGraph] Correcting invalid view range:', {
+        originalRange: range,
+        correctedRange: safeRange,
+        reason: isTooSmall ? 'too small' : 'invalid values',
+        totalRange
+      });
+      
+      return safeRange;
+    }
+    
+    return range;
+  };
+
+  // Add an effect to regularly check for and fix invalid view ranges
+  useEffect(() => {
+    // Don't run this validation during user interaction
+    if (isUserInteractingRef.current || isZoomingRef.current || isPanningRef.current) {
+      return;
+    }
+    
+    const currentRange = {
+      min: zoomStateRef.current.min,
+      max: zoomStateRef.current.max
+    };
+    
+    // Check for the specific 0-1s bug on longer content
+    const hasSmallViewBug = 
+      currentRange.max - currentRange.min <= 1 && 
+      actualTotalRangeRef.current > 5;
+    
+    if (hasSmallViewBug) {
+      console.log('[PitchGraph] Fixed 0-1s view range bug after update:', {
+        buggyRange: currentRange,
+        totalMax: actualTotalRangeRef.current
+      });
+      
+      // Apply the safe range
+      const safeRange = validateAndCorrectViewRange(currentRange);
+      zoomStateRef.current = { ...safeRange };
+      setViewRange(safeRange);
+      
+      // Update chart directly
+      if (chartRef.current && chartRef.current.options.scales?.x) {
+        chartRef.current.options.scales.x.min = safeRange.min;
+        chartRef.current.options.scales.x.max = safeRange.max;
+        chartRef.current.update('none');
+      }
+    }
+  }, [chartRef.current?.scales?.x?.min, chartRef.current?.scales?.x?.max, isMobile]);
 
   return (
     <div
