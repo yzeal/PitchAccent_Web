@@ -83,8 +83,6 @@ export interface PitchGraphWithControlsProps {
   };
 }
 
-const MIN_VISIBLE_RANGE = 200;
-const MAX_VISIBLE_RANGE = 600;
 const Y_MIN_LIMIT = 0;
 const Y_MAX_LIMIT = 600;
 
@@ -401,28 +399,32 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     if (yFit && yFit.length === 2) {
       setYRange(yFit);
     } else {
-      // Default: fit to all pitches
+      // Always use a fixed range of 50-500 Hz, only expanding if values exceed it
       const validPitches = pitches.filter((p) => p !== null) as number[];
       if (validPitches.length > 0) {
+        // Find the minimum and maximum pitch values
         let minPitch = Math.min(...validPitches);
         let maxPitch = Math.max(...validPitches);
-        minPitch = Math.floor(minPitch - 20);
-        maxPitch = Math.ceil(maxPitch + 20);
-        minPitch = Math.max(Y_MIN_LIMIT, minPitch);
-        maxPitch = Math.min(Y_MAX_LIMIT, maxPitch);
-        if (maxPitch - minPitch < MIN_VISIBLE_RANGE) {
-          const center = (maxPitch + minPitch) / 2;
-          minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MIN_VISIBLE_RANGE / 2));
-          maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MIN_VISIBLE_RANGE / 2));
-        }
-        if (maxPitch - minPitch > MAX_VISIBLE_RANGE) {
-          const center = (maxPitch + minPitch) / 2;
-          minPitch = Math.max(Y_MIN_LIMIT, Math.floor(center - MAX_VISIBLE_RANGE / 2));
-          maxPitch = Math.min(Y_MAX_LIMIT, Math.ceil(center + MAX_VISIBLE_RANGE / 2));
-        }
+        
+        // Fixed range constants
+        const DEFAULT_MIN_PITCH = 50; // Default minimum (Hz)
+        const DEFAULT_MAX_PITCH = 500; // Default maximum (Hz)
+        
+        // Only adjust the range if values are outside the default range
+        // For minimum: use lower of DEFAULT_MIN_PITCH or actual min pitch (if it's lower)
+        // For maximum: use higher of DEFAULT_MAX_PITCH or actual max pitch (if it's higher)
+        minPitch = Math.min(DEFAULT_MIN_PITCH, Math.floor(minPitch)); 
+        maxPitch = Math.max(DEFAULT_MAX_PITCH, Math.ceil(maxPitch));
+        
+        // Round to create clean values
+        minPitch = Math.floor(minPitch / 10) * 10;
+        maxPitch = Math.ceil(maxPitch / 10) * 10;
+        
+        console.log('[PitchGraph] Setting fixed y-axis range:', { minPitch, maxPitch });
         setYRange([minPitch, maxPitch]);
       } else {
-        setYRange([Y_MIN_LIMIT, Y_MIN_LIMIT + MIN_VISIBLE_RANGE]);
+        // No valid pitches, use default fixed range
+        setYRange([50, 500]);
       }
     }
   }, [pitches, yFit]);
