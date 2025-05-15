@@ -38,6 +38,7 @@ ChartJS.register(LineElement, PointElement, LinearScale, Title, Tooltip, Legend,
 interface LoopOverlayOptions {
   loopStart?: number;
   loopEnd?: number;
+  isUserRecording?: boolean;
 }
 
 // Extend Chart.js types to include our plugins and custom properties
@@ -83,12 +84,14 @@ export interface PitchGraphWithControlsProps {
   };
 }
 
-const Y_MIN_LIMIT = 0;
-const Y_MAX_LIMIT = 600;
-
 export type PitchGraphChartRef = Chart<'line', (number | null)[], number> | null;
 
 const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
+  // NOTE: This component intentionally ignores the yFit prop and maintains a fixed y-axis range of 50-500 Hz
+  // for consistent pitch visualization across different recordings.
+  // The range will only expand if actual pitch values exceed these limits.
+  // This is by design to allow easier comparison between different voice recordings.
+  
   const {
     times,
     pitches,
@@ -96,7 +99,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     color = '#1976d2',
     loopStart,
     loopEnd,
-    yFit,
+    yFit, // This prop is intentionally not used directly, see the comment above
     playbackTime = undefined,
     onChartReady,
     onLoopChange,
@@ -110,7 +113,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   
   const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [yRange, setYRange] = useState<[number, number]>([Y_MIN_LIMIT, Y_MAX_LIMIT]);
+  // Start with the default pitch range we want
+  const [yRange, setYRange] = useState<[number, number]>([50, 500]);
   
   // Create a ref for the drag controller
   const dragControllerRef = useRef<DragController | null>(null);
@@ -225,8 +229,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           enabled: !isMobile,
         },
         loopOverlay: { 
-          loopStart: Math.min(loopStart || 0, totalDataRange.max), 
-          loopEnd: Math.min(loopEnd || 0, totalDataRange.max) 
+          // Only set loop values if not a user recording
+          loopStart: isUserRecording ? 0 : Math.min(loopStart || 0, totalDataRange.max), 
+          loopEnd: isUserRecording ? 0 : Math.min(loopEnd || 0, totalDataRange.max),
+          isUserRecording // Pass this flag to the plugin
         },
         playbackIndicator: { playbackTime: 0 },
         marginIndicator: {
@@ -272,7 +278,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         },
       },
     });
-  }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max, yAxisConfig]);
+  }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max, yAxisConfig, isUserRecording]);
 
   // Add effect to ensure loop region is properly reflected in chart options
   useEffect(() => {
@@ -280,17 +286,19 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const currentLoopStart = chartRef.current.options.plugins.loopOverlay.loopStart ?? 0;
       const currentLoopEnd = chartRef.current.options.plugins.loopOverlay.loopEnd ?? 0;
       
-      // Only update if values have changed significantly
-      if (Math.abs(currentLoopStart - (loopStart ?? 0)) > 0.001 || 
-          Math.abs(currentLoopEnd - (loopEnd ?? 0)) > 0.001) {
+      // Only update if values have changed significantly and not a user recording
+      if (!isUserRecording && (
+          Math.abs(currentLoopStart - (loopStart ?? 0)) > 0.001 || 
+          Math.abs(currentLoopEnd - (loopEnd ?? 0)) > 0.001)) {
         chartRef.current.options.plugins.loopOverlay = {
           loopStart: loopStart ?? 0,
-          loopEnd: loopEnd ?? 0
+          loopEnd: loopEnd ?? 0,
+          isUserRecording
         };
         chartRef.current.update('none');
       }
     }
-  }, [loopStart, loopEnd]);
+  }, [loopStart, loopEnd, isUserRecording]);
 
   // Initialize drag controller when chart is ready
   useEffect(() => {
@@ -396,38 +404,56 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   }, [chartRef.current, onChartReady]);
 
   useEffect(() => {
-    if (yFit && yFit.length === 2) {
-      setYRange(yFit);
+    // Always use a fixed range of 50-500 Hz, only expanding if values exceed it
+    // Ignore yFit from props for consistent display
+    const validPitches = pitches.filter((p) => p !== null) as number[];
+    if (validPitches.length > 0) {
+      // Find the minimum and maximum pitch values
+      let minPitch = Math.min(...validPitches);
+      let maxPitch = Math.max(...validPitches);
+      
+      // Fixed range constants
+      const DEFAULT_MIN_PITCH = 50; // Default minimum (Hz)
+      const DEFAULT_MAX_PITCH = 500; // Default maximum (Hz)
+      
+      // Only adjust the range if values are outside the default range
+      // For minimum: use lower of DEFAULT_MIN_PITCH or actual min pitch (if it's lower)
+      // For maximum: use higher of DEFAULT_MAX_PITCH or actual max pitch (if it's higher)
+      minPitch = Math.min(DEFAULT_MIN_PITCH, Math.floor(minPitch)); 
+      maxPitch = Math.max(DEFAULT_MAX_PITCH, Math.ceil(maxPitch));
+      
+      // Round to create clean values
+      minPitch = Math.floor(minPitch / 10) * 10;
+      maxPitch = Math.ceil(maxPitch / 10) * 10;
+      
+      console.log('[PitchGraph] Setting fixed y-axis range:', { minPitch, maxPitch, actualMin: Math.min(...validPitches), actualMax: Math.max(...validPitches), yFitIgnored: yFit });
+      setYRange([minPitch, maxPitch]);
     } else {
-      // Always use a fixed range of 50-500 Hz, only expanding if values exceed it
-      const validPitches = pitches.filter((p) => p !== null) as number[];
-      if (validPitches.length > 0) {
-        // Find the minimum and maximum pitch values
-        let minPitch = Math.min(...validPitches);
-        let maxPitch = Math.max(...validPitches);
-        
-        // Fixed range constants
-        const DEFAULT_MIN_PITCH = 50; // Default minimum (Hz)
-        const DEFAULT_MAX_PITCH = 500; // Default maximum (Hz)
-        
-        // Only adjust the range if values are outside the default range
-        // For minimum: use lower of DEFAULT_MIN_PITCH or actual min pitch (if it's lower)
-        // For maximum: use higher of DEFAULT_MAX_PITCH or actual max pitch (if it's higher)
-        minPitch = Math.min(DEFAULT_MIN_PITCH, Math.floor(minPitch)); 
-        maxPitch = Math.max(DEFAULT_MAX_PITCH, Math.ceil(maxPitch));
-        
-        // Round to create clean values
-        minPitch = Math.floor(minPitch / 10) * 10;
-        maxPitch = Math.ceil(maxPitch / 10) * 10;
-        
-        console.log('[PitchGraph] Setting fixed y-axis range:', { minPitch, maxPitch });
-        setYRange([minPitch, maxPitch]);
-      } else {
-        // No valid pitches, use default fixed range
-        setYRange([50, 500]);
-      }
+      // No valid pitches, use default fixed range
+      console.log('[PitchGraph] No valid pitches, using default range: [50, 500]', { yFitIgnored: yFit });
+      setYRange([50, 500]);
     }
-  }, [pitches, yFit]);
+  }, [pitches]); // Removed yFit from dependencies to prevent it from triggering updates
+
+  // Add an effect to enforce y-axis range (ignoring yFit)
+  useEffect(() => {
+    if (yFit) {
+      console.log('[PitchGraph] Ignoring provided yFit range:', yFit, 'using fixed range instead');
+    }
+  }, [yFit]);
+
+  // Add an effect to update the chart whenever yRange changes
+  useEffect(() => {
+    if (chartRef.current && chartRef.current.options.scales?.y) {
+      console.log('[PitchGraph] Applying y-axis range to chart:', yRange);
+      
+      chartRef.current.options.scales.y.min = yRange[0];
+      chartRef.current.options.scales.y.max = yRange[1];
+      
+      // Force an update of the chart
+      chartRef.current.update('none');
+    }
+  }, [yRange]);
 
   // Add a ref to track the actual total range
   const actualTotalRangeRef = useRef<number>(1);
@@ -445,7 +471,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       max: totalDataRange.max
     } : {
       min: 0,
-      max: Math.min(initialViewDuration, totalDataRange.max)
+      max: Math.min(initialViewDuration || totalDataRange.max, totalDataRange.max)
     };
     
     console.log('[PitchGraph] Resetting zoom:', {
@@ -454,7 +480,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       totalRange: totalDataRange,
       shouldUseFullRange,
       timePointsCount: times.length,
-      isUserRecording
+      isUserRecording,
+      totalDataRangeMax: totalDataRange.max,
+      actualTotalRange: actualTotalRangeRef.current
     });
 
     // Update zoom state
@@ -477,7 +505,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Update the useEffect that handles totalDataRange updates to use isUserRecording
   useEffect(() => {
     // Use totalDuration as the source of truth if available
-    const newMax = totalDuration || 1;
+    const newMax = totalDuration || (times.length > 0 ? times[times.length - 1] : 1);
     console.log('[PitchGraph] Updating total data range:', {
         oldRange: totalDataRange,
         newMax,
@@ -486,7 +514,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         lastTimePoint: times.length > 0 ? times[times.length - 1] : null,
         isUserInteracting: isUserInteractingRef.current,
         currentZoomState: { ...zoomStateRef.current },
-        isUserRecording
+        isUserRecording,
+        explicitLastPoint: times[times.length - 1]
     });
     
     // Update the actual total range ref
@@ -509,7 +538,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       initialViewDuration,
       totalDuration: newMax,
       isUserRecording,
-      timePointsCount: times.length
+      timePointsCount: times.length,
+      finalRangeMin: updatedRange.min,
+      finalRangeMax: updatedRange.max
     });
     
     setTotalDataRange({ min: 0, max: newMax });
@@ -519,6 +550,11 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     // Update chart if it exists
     if (chartRef.current) {
       if (chartRef.current.options.scales?.x) {
+        console.log('[PitchGraph] Directly setting chart scales:', {
+          min: updatedRange.min,
+          max: updatedRange.max,
+          totalDataRangeMax: newMax
+        });
         chartRef.current.options.scales.x.min = updatedRange.min;
         chartRef.current.options.scales.x.max = updatedRange.max;
       }
@@ -1150,6 +1186,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     beforeDatasetsDraw: (chart: Chart) => {
       const options = chart.options.plugins?.loopOverlay;
       if (!options) return;
+      
+      // Check both the options flag and the component prop to be sure
+      if (options.isUserRecording || isUserRecording) return;
       
       const ls = options.loopStart;
       const le = options.loopEnd;

@@ -8,6 +8,8 @@
 - If audio output volume is stuck after recording on iOS, try reloading the page or closing the tab to restore normal volume control
 - **Initial audio quality in browser:**
   Sometimes, when playing audio or video for the first time in the browser, the quality may be lower or have artifacts for the first second or two. This is due to browser/decoder warmup and usually self-corrects quickly. Possible improvements include waiting for the `canplaythrough` event before playback, but this is a common browser limitation. Consider mentioning this in the user guide as a known issue.
+- **Recording length recommendations:**
+  For optimal performance and user experience, recommend recordings between 5-30 seconds. The app can handle recordings up to 2 minutes, but very long recordings may affect performance on older devices. Very short recordings (<1 second) may not provide enough data for accurate pitch detection.
 
 ## Options Menu (future ideas)
 - Customizable loop delay for native and user recordings
@@ -22,5 +24,21 @@
   - Separate toggle for mobile/desktop devices
   - Customizable tooltip content and appearance
   - Option to show tooltips only when graph is paused
+- **Pitch detection range settings:**
+  - Allow users to adjust minimum and maximum pitch detection thresholds
+  - Default: 60-500 Hz (suitable for speech)
+  - Extended range option: up to 1000-1500 Hz (for singing or high-pitched voices)
+  - Warning that very wide ranges may affect detection accuracy for normal speech
+- **Loop overlay appearance:**
+  - Adjust transparency/color of loop overlay
+  - Option to completely hide loop overlay for user recordings where looping is not needed
+
+## UI/UX Design Guidelines
+- **Individual reset buttons:**
+  - Every user-configurable setting should have its own small reset button
+  - Reset buttons should have tooltip text "Restore default value"
+  - Use the same design as "Reset loop region" button (small circular arrow)
+  - Position reset buttons consistently next to each option for intuitive use
+  - Reset buttons should only be visible/active when the value differs from default
 
 # Add more notes here as new features/ideas arise 
