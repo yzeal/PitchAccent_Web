@@ -939,16 +939,33 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const currentLoopStart = preservedLoopRef.current.start;
       const currentLoopEnd = preservedLoopRef.current.end;
       
-      const deltaX = touch.clientX - touchPanRef.current.x;
-      
+      // IMPROVED MOBILE PANNING FOR LONG VIDEOS:
+      // Instead of using absolute getValueForPixel, use the same relative calculation as mouse panning
+      const touchDeltaX = touch.clientX - touchPanRef.current.x;
       const xScale = chart.scales.x;
-      if (!xScale?.getValueForPixel) return;
       
-      const value0 = xScale.getValueForPixel(0);
-      const valueDx = xScale.getValueForPixel(deltaX);
-      if (value0 === undefined || valueDx === undefined) return;
+      if (!xScale) return;
       
-      const deltaValue = valueDx - value0;
+      // Use the same pixel-to-unit conversion as mouse panning
+      const chartArea = chart.chartArea;
+      const pixelsPerUnit = (chartArea.right - chartArea.left) / (xScale.max - xScale.min);
+      
+      // Apply a small multiplier for mobile to make panning feel more responsive
+      // (since touch is less precise than mouse)
+      const mobilePanMultiplier = 1.2;
+      const deltaValue = (touchDeltaX / pixelsPerUnit) * mobilePanMultiplier;
+      
+      // Log occasionally to debug
+      if (Math.random() < 0.05) {
+        console.log('[PitchGraph] Mobile Pan:', {
+          touchDeltaX,
+          pixelsPerUnit,
+          deltaValue,
+          viewWidth: chartArea.right - chartArea.left,
+          viewRange: xScale.max - xScale.min,
+          mobilePanMultiplier
+        });
+      }
       
       const { min: currentMin, max: currentMax } = zoomStateRef.current;
       const currentRange = currentMax - currentMin;
@@ -965,7 +982,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       } else if (newMax > totalDataRange.max) {
         // If trying to pan beyond right edge, lock to max
         newMax = totalDataRange.max;
-        newMin = newMax - currentRange;
+        newMin = Math.max(0, newMax - currentRange);
       }
       
       // Update zoom state
