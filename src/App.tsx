@@ -95,6 +95,13 @@ const App: React.FC = () => {
   // Add loading state for pitch data
   const [isLoadingPitchData, setIsLoadingPitchData] = useState(false);
 
+  // Add auto-loop state
+  const [autoLoopEnabled, setAutoLoopEnabled] = useState(false);
+
+  // Add state to track if user is actively seeking
+  const [isUserSeeking, setIsUserSeeking] = useState(false);
+  const seekingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Add drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -685,17 +692,30 @@ const App: React.FC = () => {
       preservedLoopEnd,
       currentLoopStart: loopStart,
       currentLoopEnd: loopEnd,
-      userSetLoop: userSetLoopRef.current
+      userSetLoop: userSetLoopRef.current,
+      autoLoopEnabled
     });
     
-    // Prefer user-set values if available, otherwise use preserved values
-    const loopToPreserve = userSetLoopRef.current || 
-      (preservedLoopStart !== undefined && preservedLoopEnd !== undefined ? 
-        { start: preservedLoopStart, end: preservedLoopEnd } : 
-        { start: loopStart, end: loopEnd });
-        
-    // Call handleViewChange with the preferred loop values
-    handleViewChange(startTime, endTime, loopToPreserve.start, loopToPreserve.end);
+    // If auto-loop is enabled, set the loop region to match the view
+    if (autoLoopEnabled) {
+      console.log('[App] Auto-loop enabled, setting loop region to match view:', { start: startTime, end: endTime });
+      // Update userSetLoopRef since this is effectively a user action
+      userSetLoopRef.current = { start: startTime, end: endTime };
+      setLoopStartWithLogging(startTime);
+      setLoopEndWithLogging(endTime);
+      
+      // Call handleViewChange with the new loop region
+      handleViewChange(startTime, endTime, startTime, endTime);
+    } else {
+      // Prefer user-set values if available, otherwise use preserved values
+      const loopToPreserve = userSetLoopRef.current || 
+        (preservedLoopStart !== undefined && preservedLoopEnd !== undefined ? 
+          { start: preservedLoopStart, end: preservedLoopEnd } : 
+          { start: loopStart, end: loopEnd });
+          
+      // Call handleViewChange with the preferred loop values
+      handleViewChange(startTime, endTime, loopToPreserve.start, loopToPreserve.end);
+    }
   };
 
   // --- Native playback time tracking ---
@@ -730,7 +750,14 @@ const App: React.FC = () => {
     const media = getActiveMediaElement();
     if (!media) return;
     let timeout: NodeJS.Timeout | null = null;
+    
+    // Only consider seeking state when auto-loop is enabled
+    // When auto-loop is disabled, we should maintain normal looping behavior regardless of seeking
+    const shouldConsiderSeekingState = autoLoopEnabled;
+    const shouldApplyLoop = shouldConsiderSeekingState ? !isUserSeeking : true;
+    
     if (
+      shouldApplyLoop &&
       !media.paused &&
       loopEnd > loopStart &&
       nativePlaybackTime >= loopEnd
@@ -744,7 +771,127 @@ const App: React.FC = () => {
     return () => {
       if (timeout) clearTimeout(timeout);
     };
-  }, [nativePlaybackTime, loopStart, loopEnd, loopDelay]);
+  }, [nativePlaybackTime, loopStart, loopEnd, loopDelay, isUserSeeking, autoLoopEnabled]);
+
+  // Add event listeners to detect when user is seeking
+  React.useEffect(() => {
+    const media = getActiveMediaElement();
+    if (!media) return;
+    
+    // Only add seeking detection when auto-loop is enabled
+    if (!autoLoopEnabled) {
+      // Clean up any existing timeouts to avoid memory leaks
+      if (seekingTimeoutRef.current) {
+        clearTimeout(seekingTimeoutRef.current);
+      }
+      return;
+    }
+    
+    const onSeeking = () => {
+      console.log('[App] User is seeking');
+      setIsUserSeeking(true);
+      
+      // Clear any existing timeout
+      if (seekingTimeoutRef.current) {
+        clearTimeout(seekingTimeoutRef.current);
+      }
+    };
+    
+    const onSeeked = () => {
+      // Delay resetting the seeking state to prevent immediate loop activation
+      seekingTimeoutRef.current = setTimeout(() => {
+        console.log('[App] User finished seeking');
+        setIsUserSeeking(false);
+      }, 500); // 500ms delay to ensure the user has finished seeking
+    };
+    
+    // Add event listeners
+    media.addEventListener('seeking', onSeeking);
+    media.addEventListener('seeked', onSeeked);
+    
+    // Support manual timeline clicking as well
+    const onTimeUpdate = () => {
+      // Get media duration - use the more reliable pitchManager duration if available
+      const totalDuration = pitchManager.current.getTotalDuration() || 
+        (media.seekable && media.seekable.length > 0 ? media.seekable.end(0) : media.duration);
+      
+      // Reset seeking state when we're near the end of the media to prevent errors
+      const isNearEndOfMedia = totalDuration > 0 && 
+        (totalDuration - media.currentTime < 0.5 || media.ended);
+        
+      if (isNearEndOfMedia && isUserSeeking) {
+        console.log('[App] Near end of media, resetting seeking state to restore loop behavior');
+        setIsUserSeeking(false);
+        
+        // Clear any existing timeout
+        if (seekingTimeoutRef.current) {
+          clearTimeout(seekingTimeoutRef.current);
+        }
+        return;
+      }
+      
+      // If there's a large gap between current time and last known playback time
+      // and the media is not paused, it might be a manual seeking operation
+      const timeDifference = Math.abs(media.currentTime - nativePlaybackTime);
+      if (timeDifference > 1.0 && !media.paused) {
+        console.log('[App] Detected manual timeline seek:', { 
+          currentTime: media.currentTime, 
+          lastKnownTime: nativePlaybackTime,
+          difference: timeDifference
+        });
+        setIsUserSeeking(true);
+        
+        // Clear any existing timeout
+        if (seekingTimeoutRef.current) {
+          clearTimeout(seekingTimeoutRef.current);
+        }
+        
+        // Reset after a short delay
+        seekingTimeoutRef.current = setTimeout(() => {
+          setIsUserSeeking(false);
+        }, 500);
+      }
+    };
+    
+    media.addEventListener('timeupdate', onTimeUpdate);
+    
+    // Add specific error handling for end of media errors
+    const onError = () => {
+      console.log('[App] Media error detected, resetting seeking state:', media.error);
+      setIsUserSeeking(false);
+      
+      // Clear any existing timeout
+      if (seekingTimeoutRef.current) {
+        clearTimeout(seekingTimeoutRef.current);
+      }
+    };
+    
+    // Add ended event listener to reset seeking state
+    const onEnded = () => {
+      console.log('[App] Media playback ended, resetting seeking state');
+      setIsUserSeeking(false);
+      
+      // Clear any existing timeout
+      if (seekingTimeoutRef.current) {
+        clearTimeout(seekingTimeoutRef.current);
+      }
+    };
+    
+    media.addEventListener('ended', onEnded);
+    media.addEventListener('error', onError);
+    
+    return () => {
+      media.removeEventListener('seeking', onSeeking);
+      media.removeEventListener('seeked', onSeeked);
+      media.removeEventListener('timeupdate', onTimeUpdate);
+      media.removeEventListener('ended', onEnded);
+      media.removeEventListener('error', onError);
+      
+      if (seekingTimeoutRef.current) {
+        clearTimeout(seekingTimeoutRef.current);
+      }
+    };
+  }, [nativePlaybackTime, autoLoopEnabled, isUserSeeking]);
 
   // --- User recording playback time tracking ---
   React.useEffect(() => {
@@ -922,7 +1069,8 @@ const App: React.FC = () => {
     
     console.log('[App] Jumping to playback position:', {
       currentTime,
-      newView: { startTime, endTime }
+      newView: { startTime, endTime },
+      autoLoopEnabled
     });
     
     // First, set loading state to indicate we're changing view
@@ -937,12 +1085,40 @@ const App: React.FC = () => {
       if (nativeChartInstance && nativeChartInstance.setViewRange) {
         console.log('[App] Updating chart view range to:', { min: startTime, max: endTime });
         nativeChartInstance.setViewRange({ min: startTime, max: endTime });
+        
+        // If auto-loop is enabled, also set the loop region to match the view
+        if (autoLoopEnabled) {
+          console.log('[App] Auto-loop enabled, setting loop region to match view:', { start: startTime, end: endTime });
+          // Update userSetLoopRef since this is effectively a user action
+          userSetLoopRef.current = { start: startTime, end: endTime };
+          setLoopStartWithLogging(startTime);
+          setLoopEndWithLogging(endTime);
+          
+          // Set playback position to start of loop
+          if (media) {
+            media.currentTime = startTime;
+          }
+        }
       } else if (nativeChartInstance && nativeChartInstance.options.scales?.x) {
         // Fallback if setViewRange not available
         console.log('[App] Fallback: Updating chart scales directly');
         nativeChartInstance.options.scales.x.min = startTime;
         nativeChartInstance.options.scales.x.max = endTime;
         nativeChartInstance.update();
+        
+        // If auto-loop is enabled, also set the loop region to match the view
+        if (autoLoopEnabled) {
+          console.log('[App] Auto-loop enabled, setting loop region to match view:', { start: startTime, end: endTime });
+          // Update userSetLoopRef since this is effectively a user action
+          userSetLoopRef.current = { start: startTime, end: endTime };
+          setLoopStartWithLogging(startTime);
+          setLoopEndWithLogging(endTime);
+          
+          // Set playback position to start of loop
+          if (media) {
+            media.currentTime = startTime;
+          }
+        }
       }
       
       // Clear loading state
@@ -1126,17 +1302,29 @@ const App: React.FC = () => {
                     Loop visible
                   </button>
                   
-                  {/* Jump to playback position button - only for long videos */}
-                  {nativeMediaDuration > 30 && (
-                    <button
-                      style={{ fontSize: 12, padding: '2px 8px', marginLeft: 8 }}
-                      title="Jump to current playback position"
-                      disabled={!nativeChartInstance || !getActiveMediaElement()}
-                      onClick={jumpToPlaybackPosition}
-                    >
-                      Jump to playback
-                    </button>
-                  )}
+                  {/* Add the Auto-loop checkbox near the other controls */}
+                  <div style={{ width: '100%', maxWidth: 400, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <input
+                        type="checkbox"
+                        checked={autoLoopEnabled}
+                        onChange={(e) => setAutoLoopEnabled(e.target.checked)}
+                      />
+                      Auto-loop visible area
+                    </label>
+                    
+                    {/* Jump to playback position button - only for long videos */}
+                    {nativeMediaDuration > 30 && (
+                      <button
+                        style={{ fontSize: 12, padding: '2px 8px', marginLeft: 'auto' }}
+                        title="Jump to current playback position"
+                        disabled={!nativeChartInstance || !getActiveMediaElement()}
+                        onClick={jumpToPlaybackPosition}
+                      >
+                        Jump to playback
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
