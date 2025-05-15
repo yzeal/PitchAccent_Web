@@ -1086,7 +1086,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         }
         // If no voiced segments found, use a fallback value
         else {
-          smoothedData[i] = VOICED_THRESHOLD; // Default to threshold value
+          smoothedData[i] = VOICED_THRESHOLD; // Default to threshold value 
         }
       }
     }
