@@ -53,6 +53,16 @@ export interface PitchGraphWithControlsProps {
   showNavigationHints?: boolean;
   totalDuration?: number;
   initialViewDuration?: number;
+  isUserRecording?: boolean;
+  yAxisConfig?: {
+    beginAtZero?: boolean;
+    suggestedMin?: number;
+    suggestedMax?: number;
+    ticks?: {
+      stepSize?: number;
+      precision?: number;
+    };
+  };
 }
 
 const MIN_VISIBLE_RANGE = 200;
@@ -78,6 +88,8 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     showNavigationHints = false,
     totalDuration,
     initialViewDuration,
+    isUserRecording = false,
+    yAxisConfig,
   } = props;
   
   const chartRef = useRef<Chart<'line', (number | null)[], number> | null>(null);
@@ -222,16 +234,26 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         },
         y: {
           title: { display: false },
-          ticks: { font: { size: 10 } },
+          ticks: { 
+            font: { size: 10 },
+            // Apply custom ticks configuration if provided
+            ...(yAxisConfig?.ticks || {})
+          },
           min: yRange[0],
           max: yRange[1],
+          // Apply other y-axis configurations if provided
+          beginAtZero: yAxisConfig?.beginAtZero,
+          suggestedMin: yAxisConfig?.suggestedMin,
+          suggestedMax: yAxisConfig?.suggestedMax,
+          grid: {
+          },
         },
       },
       elements: {
         line: { tension: 0.2 },
       },
     });
-  }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max]);
+  }, [xMax, yRange, loopStart, loopEnd, showLeftMargin, showRightMargin, zoomStateRef.current.min, zoomStateRef.current.max, isMobile, totalDataRange.max, yAxisConfig]);
 
   // Add effect to ensure loop region is properly reflected in chart options
   useEffect(() => {
@@ -387,7 +409,49 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Add a ref to track the actual total range
   const actualTotalRangeRef = useRef<number>(1);
 
-  // Update the useEffect that handles totalDataRange updates
+  // Modify handleResetZoom to use isUserRecording
+  const handleResetZoom = () => {
+    if (!chartRef.current) return;
+    
+    // Always show the full range for user recordings
+    // and respect initialViewDuration only for longer native recordings
+    const shouldUseFullRange = isUserRecording || !initialViewDuration || totalDataRange.max <= 20;
+    
+    const resetRange = shouldUseFullRange ? {
+      min: 0,
+      max: totalDataRange.max
+    } : {
+      min: 0,
+      max: Math.min(initialViewDuration, totalDataRange.max)
+    };
+    
+    console.log('[PitchGraph] Resetting zoom:', {
+      resetRange,
+      initialViewDuration: initialViewDuration,
+      totalRange: totalDataRange,
+      shouldUseFullRange,
+      timePointsCount: times.length,
+      isUserRecording
+    });
+
+    // Update zoom state
+    zoomStateRef.current = resetRange;
+    setViewRange(resetRange);
+
+    // Update chart scales
+    if (chartRef.current.options.scales?.x) {
+      chartRef.current.options.scales.x.min = resetRange.min;
+      chartRef.current.options.scales.x.max = resetRange.max;
+    }
+    chartRef.current.update('none');
+
+    // Notify parent of view change
+    if (onViewChange) {
+      onViewChange(resetRange.min, resetRange.max);
+    }
+  };
+
+  // Update the useEffect that handles totalDataRange updates to use isUserRecording
   useEffect(() => {
     // Use totalDuration as the source of truth if available
     const newMax = totalDuration || 1;
@@ -398,14 +462,18 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         totalDuration,
         lastTimePoint: times.length > 0 ? times[times.length - 1] : null,
         isUserInteracting: isUserInteractingRef.current,
-        currentZoomState: { ...zoomStateRef.current }
+        currentZoomState: { ...zoomStateRef.current },
+        isUserRecording
     });
     
     // Update the actual total range ref
     actualTotalRangeRef.current = newMax;
     
-    // Set initial view range based on initialViewDuration if provided
-    const updatedRange = initialViewDuration ? {
+    // For user recordings, always show the full range immediately
+    const updatedRange = isUserRecording || (!initialViewDuration && newMax <= 20) ? {
+      min: 0,
+      max: newMax
+    } : initialViewDuration ? {
       min: 0,
       max: Math.min(initialViewDuration, newMax)
     } : {
@@ -415,8 +483,10 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     
     console.log('[PitchGraph] Setting initial view range:', {
       updatedRange,
-      initialViewDuration: initialViewDuration,
-      totalDuration: newMax
+      initialViewDuration,
+      totalDuration: newMax,
+      isUserRecording,
+      timePointsCount: times.length
     });
     
     setTotalDataRange({ min: 0, max: newMax });
@@ -431,48 +501,9 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       }
       chartRef.current.update('none');
     }
-  }, [totalDuration, initialViewDuration]);
+  }, [totalDuration, initialViewDuration, times, isUserRecording]);
 
-  // Remove the old initialization effect since we handle it in the data range update
-  useEffect(() => {
-    if (chartRef.current) {
-      console.log('[PitchGraph] Updating chart range:', {
-        currentZoomState: zoomStateRef.current,
-        newDataRange: totalDataRange,
-        trigger: 'data range change'
-      });
-
-      // Only set initial view if we don't have a valid view range yet
-      if (zoomStateRef.current.max === 0 || zoomStateRef.current.min === zoomStateRef.current.max) {
-        const initialRange = { min: 0, max: totalDataRange.max };
-        zoomStateRef.current = initialRange;
-        setViewRange(initialRange);
-        
-        // Update chart scales directly
-        if (chartRef.current.options.scales?.x) {
-          chartRef.current.options.scales.x.min = initialRange.min;
-          chartRef.current.options.scales.x.max = initialRange.max;
-        }
-        chartRef.current.update('none');
-      }
-    }
-  }, [totalDataRange]);
-
-  // Modify useEffect to call onViewChange when view range changes
-  useEffect(() => {
-    if (onViewChange && viewRange.min !== undefined && viewRange.max !== undefined) {
-      // Only trigger if the view range has actually changed and is valid
-      if ((viewRange.min !== prevViewRangeRef.current.min || 
-           viewRange.max !== prevViewRangeRef.current.max) &&
-          !isNaN(viewRange.min) && !isNaN(viewRange.max) &&
-          viewRange.max > viewRange.min) {
-        prevViewRangeRef.current = { ...viewRange };
-        onViewChange(viewRange.min, viewRange.max);
-      }
-    }
-  }, [viewRange, onViewChange]);
-
-  // Modify handleWheel for zooming to limit max view range to 20 seconds
+  // Modify handleWheel to remove artificial view range limits for user recordings
   const handleWheel = (e: WheelEvent) => {
     const chart = chartRef.current;
     if (!chart || dragControllerRef.current?.isDragging()) return;
@@ -502,9 +533,15 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const currentRange = currentMax - currentMin;
     let newRange = currentRange * zoomFactor;
     
-    // Enforce minimum (1s) and maximum view range
-    const minViewRange = 1;
-    const maxViewRange = Math.min(20, totalDuration || totalDataRange.max); // Limit to 20 seconds or total duration
+    // Enforce minimum (0.5s) view range
+    const minViewRange = 0.5;
+    
+    // Don't enforce an arbitrary maximum for user recordings
+    // Only enforce a maximum for longer native recordings
+    const isLongNativeRecording = initialViewDuration !== undefined && totalDataRange.max > 30;
+    const maxViewRange = isLongNativeRecording ? 
+      Math.min(20, totalDuration || totalDataRange.max) : // Limit to 20s for long native recordings
+      totalDuration || totalDataRange.max; // No limit for user recordings
     
     // Don't allow zooming out beyond maximum view range
     if (newRange > maxViewRange) {
@@ -1098,6 +1135,14 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
   // Add ref to track if we've done initial setup
   const hasInitializedRef = useRef(false);
 
+  // Reset hasInitializedRef when user recording changes
+  useEffect(() => {
+    if (isUserRecording) {
+      console.log('[PitchGraph] User recording detected, resetting initialization flag');
+      hasInitializedRef.current = false;
+    }
+  }, [isUserRecording, times.length]);
+
   // Modify auto-reset zoom to only trigger on initial load
   useEffect(() => {
     if (!hasInitializedRef.current && times.length > 0) {
@@ -1165,42 +1210,6 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     };
   }, [canvasRef.current, dragControllerRef.current]);
 
-  // Handle reset zoom
-  const handleResetZoom = () => {
-    if (!chartRef.current) return;
-    
-    // Use initialViewDuration if provided, otherwise show full range
-    const resetRange = props.initialViewDuration ? {
-      min: 0,
-      max: Math.min(props.initialViewDuration, totalDataRange.max)
-    } : {
-      min: 0,
-      max: totalDataRange.max
-    };
-    
-    console.log('[PitchGraph] Resetting zoom:', {
-      resetRange,
-      initialViewDuration: props.initialViewDuration,
-      totalRange: totalDataRange
-    });
-
-    // Update zoom state
-    zoomStateRef.current = resetRange;
-    setViewRange(resetRange);
-
-    // Update chart scales
-    if (chartRef.current.options.scales?.x) {
-      chartRef.current.options.scales.x.min = resetRange.min;
-      chartRef.current.options.scales.x.max = resetRange.max;
-    }
-    chartRef.current.update('none');
-
-    // Notify parent of view change
-    if (onViewChange) {
-      onViewChange(resetRange.min, resetRange.max);
-    }
-  };
-
   // Update playback time without recalculating options
   useEffect(() => {
     const chart = chartRef.current;
@@ -1243,6 +1252,20 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       chart.draw();
     });
   }, [playbackTime, loopStart, loopEnd]);
+
+  // Add back the useEffect for handling view range changes and notifying parent
+  useEffect(() => {
+    if (onViewChange && viewRange.min !== undefined && viewRange.max !== undefined) {
+      // Only trigger if the view range has actually changed and is valid
+      if ((viewRange.min !== prevViewRangeRef.current.min || 
+           viewRange.max !== prevViewRangeRef.current.max) &&
+          !isNaN(viewRange.min) && !isNaN(viewRange.max) &&
+          viewRange.max > viewRange.min) {
+        prevViewRangeRef.current = { ...viewRange };
+        onViewChange(viewRange.min, viewRange.max);
+      }
+    }
+  }, [viewRange, onViewChange]);
 
   return (
     <div

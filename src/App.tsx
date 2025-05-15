@@ -30,6 +30,10 @@ const MAX_PITCH = 500
 const MIN_CLARITY = 0.8
 const MEDIAN_FILTER_SIZE = 5
 
+// Constants for default y-axis bounds (update to more visually pleasing round numbers)
+const DEFAULT_MIN_PITCH = 50;
+const DEFAULT_MAX_PITCH = 500;
+
 // Type definitions
 interface AudioContextType extends AudioContext {
   decodeAudioData: (arrayBuffer: ArrayBuffer) => Promise<AudioBuffer>;
@@ -101,6 +105,28 @@ const App: React.FC = () => {
   // Add state to track if user is actively seeking
   const [isUserSeeking, setIsUserSeeking] = useState(false);
   const seekingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Add a flag to indicate if the recording is a user recording
+  const [isUserRecording, setIsUserRecording] = useState(false);
+
+  // Get the chart instance reference for the user recording
+  const [userChartInstance, setUserChartInstance] = useState<ExtendedChart | null>(null);
+
+  // Add effect to reset user chart view on new recording
+  React.useEffect(() => {
+    if (userChartInstance && isUserRecording && userPitchData.times.length > 0) {
+      const duration = userPitchData.times[userPitchData.times.length - 1];
+      console.log('[App] Directly setting user recording view range:', { min: 0, max: duration });
+      
+      if (userChartInstance.setViewRange) {
+        userChartInstance.setViewRange({ min: 0, max: duration });
+      } else if (userChartInstance.options.scales?.x) {
+        userChartInstance.options.scales.x.min = 0;
+        userChartInstance.options.scales.x.max = duration;
+        userChartInstance.update();
+      }
+    }
+  }, [userChartInstance, isUserRecording, userPitchData.times.length]);
 
   // Add drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
@@ -177,6 +203,10 @@ const App: React.FC = () => {
   // Extract pitch from user recording when audioBlob changes
   React.useEffect(() => {
     if (!audioBlob) return;
+    
+    // This is a user recording
+    setIsUserRecording(true);
+    
     const extract = async () => {
       try {
         const arrayBuffer = await audioBlob.arrayBuffer();
@@ -201,6 +231,26 @@ const App: React.FC = () => {
         }
         const smoothed = medianFilter(pitches, MEDIAN_FILTER_SIZE);
         setUserPitchData({ times, pitches: smoothed });
+        
+        // Calculate the initial range for user pitch data when extracted
+        const [minPitch, maxPitch] = calculateInitialPitchRange(smoothed);
+        
+        // Use the same y-axis range for user data as we do for native data
+        // This makes it easier to compare the two
+        const currentYFit = loopYFit || [DEFAULT_MIN_PITCH, DEFAULT_MAX_PITCH];
+        const newYFit: [number, number] = [
+          Math.min(minPitch, currentYFit[0]),
+          Math.max(maxPitch, currentYFit[1])
+        ];
+        
+        // Only update if the range has changed
+        if (newYFit[0] !== currentYFit[0] || newYFit[1] !== currentYFit[1]) {
+          console.log('[App] Adjusting y-axis range to include user pitch data:', {
+            current: currentYFit,
+            new: newYFit
+          });
+          setLoopYFit(newYFit);
+        }
       } catch (error) {
         console.error('Error extracting pitch:', error);
         setUserPitchData({ times: [], pitches: [] });
@@ -208,6 +258,21 @@ const App: React.FC = () => {
     };
     extract();
   }, [audioBlob]);
+
+  // Add a helper effect to force redraw of user recording when data changes
+  React.useEffect(() => {
+    // Only run this for user recordings that have data
+    if (isUserRecording && userPitchData.times.length > 0) {
+      console.log('[App] User recording data updated, length:', userPitchData.times.length);
+    }
+  }, [isUserRecording, userPitchData.times.length]);
+
+  // Reset isUserRecording when a native file is loaded
+  React.useEffect(() => {
+    if (nativeMediaUrl) {
+      setIsUserRecording(false);
+    }
+  }, [nativeMediaUrl]);
 
   // Modify handleNativeFileChange
   const handleNativeFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -593,7 +658,68 @@ const App: React.FC = () => {
     fitYAxisToLoop();
   };
 
-  // Modify the fitYAxisToLoop function to check for valid user-set values
+  // --- Add function to calculate initial pitch range ---
+  const calculateInitialPitchRange = (pitches: (number | null)[]): [number, number] => {
+    // Filter out nulls
+    const validPitches = pitches.filter(p => p !== null) as number[];
+    
+    if (validPitches.length === 0) {
+      return [DEFAULT_MIN_PITCH, DEFAULT_MAX_PITCH];
+    }
+    
+    // Find min and max values
+    let minPitch = Math.min(...validPitches);
+    let maxPitch = Math.max(...validPitches);
+    
+    // Apply default lower bound if actual data doesn't go below it
+    if (minPitch > DEFAULT_MIN_PITCH) {
+      minPitch = DEFAULT_MIN_PITCH;
+    } else {
+      // Round down to nearest 10 and ensure it's not higher than DEFAULT_MIN_PITCH
+      minPitch = Math.min(DEFAULT_MIN_PITCH, Math.floor(minPitch / 10) * 10);
+    }
+    
+    // Apply default upper bound if actual data doesn't go above it
+    if (maxPitch < DEFAULT_MAX_PITCH) {
+      maxPitch = DEFAULT_MAX_PITCH;
+    } else {
+      // Round up to nearest 10 and ensure nice round numbers
+      maxPitch = Math.ceil(maxPitch / 10) * 10;
+      // If we're close to 500, just use 500 exactly
+      if (maxPitch > 490 && maxPitch < 510) {
+        maxPitch = 500;
+      }
+    }
+    
+    console.log('[App] Calculated initial pitch range:', {
+      minPitch,
+      maxPitch,
+      dataMin: Math.min(...validPitches),
+      dataMax: Math.max(...validPitches),
+      DEFAULT_MIN_PITCH,
+      DEFAULT_MAX_PITCH
+    });
+    
+    return [minPitch, maxPitch] as [number, number];
+  };
+
+  // --- Update the useEffect hook that sets the y-axis range to only do it once per file ---
+  React.useEffect(() => {
+    if (!nativePitchData.pitches.length) return;
+    
+    // Only calculate the y-axis range once when loading a new file
+    if (isLoadingNewFileRef.current) {
+      console.log('[App] Setting initial y-axis range for new file');
+      
+      // Calculate the initial range based on the pitch data
+      const [minPitch, maxPitch] = calculateInitialPitchRange(nativePitchData.pitches);
+      
+      // Set the y-axis range
+      setLoopYFit([minPitch, maxPitch]);
+    }
+  }, [nativePitchData.pitches]);
+  
+  // --- Replace or modify the fitYAxisToLoop function ---
   function fitYAxisToLoop() {
     if (!nativePitchData.times.length) return;
 
@@ -615,80 +741,13 @@ const App: React.FC = () => {
       setLoopStartWithLogging(userSetLoop.start);
       setLoopEndWithLogging(userSetLoop.end);
       
-      // Use these values for further calculations
+      // Skip further processing since we're just restoring loop regions, not modifying the y-axis
       return;
     }
 
-    // Make sure we're using the latest loop region boundaries
-    console.log('[App] Starting Y axis fitting with loop region:', {
-      loopStart,
-      loopEnd,
-      stack: new Error().stack?.split('\n').slice(1, 3).join('\n')
-    });
-
-    // Find all pitches within the loop region
-    const pitchesInRange = [];
-    for (let i = 0; i < nativePitchData.times.length; i++) {
-      const time = nativePitchData.times[i];
-      if (time >= loopStart && time <= loopEnd) {
-        const pitch = nativePitchData.pitches[i];
-        if (pitch !== null) pitchesInRange.push(pitch);
-      }
-    }
-
-    // Skip the rest of the fitting if we don't have any pitches in range
-    if (pitchesInRange.length === 0) {
-      console.log('[App] No pitches found in loop region, skipping Y axis fitting');
-      return;
-    }
-
-    // Determine which pitches to use for y-axis fitting
-    const pitchesToFit = pitchesInRange.length > 0 
-      ? pitchesInRange 
-      : nativePitchData.pitches.filter(p => p !== null) as number[];
-
-    if (pitchesToFit.length === 0) return;
-
-    // Calculate initial range
-    let minPitch = Math.min(...pitchesToFit);
-    let maxPitch = Math.max(...pitchesToFit);
-
-    // Add padding (at least 20Hz or 10% of range)
-    const padding = Math.max(20, (maxPitch - minPitch) * 0.1);
-    minPitch = Math.floor(minPitch - padding);
-    maxPitch = Math.ceil(maxPitch + padding);
-
-    // Enforce absolute limits
-    minPitch = Math.max(0, minPitch);
-    maxPitch = Math.min(600, maxPitch);
-
-    // Ensure minimum range for visibility
-    if (maxPitch - minPitch < 200) {
-      const center = (maxPitch + minPitch) / 2;
-      const halfRange = 100;
-      minPitch = Math.max(0, Math.floor(center - halfRange));
-      maxPitch = Math.min(600, Math.ceil(center + halfRange));
-    }
-
-    // Cap maximum range
-    if (maxPitch - minPitch > 600) {
-      const center = (maxPitch + minPitch) / 2;
-      const halfRange = 300;
-      minPitch = Math.max(0, Math.floor(center - halfRange));
-      maxPitch = Math.min(600, Math.ceil(center + halfRange));
-    }
-
-    console.log('[App] Fitting Y axis:', {
-      source: pitchesInRange.length > 0 ? 'loop region' : 'all pitches',
-      loopStart,
-      loopEnd,
-      pitchesFound: pitchesToFit.length,
-      minPitch,
-      maxPitch,
-      range: maxPitch - minPitch
-    });
-
-    setLoopYFit([minPitch, maxPitch]);
+    console.log('[App] fitYAxisToLoop called but not changing y-axis range, keeping it consistent');
+    // We no longer modify the y-axis range in this function
+    // The y-axis range is set once when loading a new file and remains constant
   }
 
   // Update the view change handler
@@ -1380,6 +1439,15 @@ const App: React.FC = () => {
                 showNavigationHints={true}
                 totalDuration={nativeMediaDuration}
                 initialViewDuration={nativeMediaDuration > 30 ? 10 : undefined}
+                yAxisConfig={{
+                  beginAtZero: false,
+                  suggestedMin: loopYFit ? loopYFit[0] : DEFAULT_MIN_PITCH,
+                  suggestedMax: loopYFit ? loopYFit[1] : DEFAULT_MAX_PITCH,
+                  ticks: {
+                    stepSize: 50,
+                    precision: 0
+                  }
+                }}
               />
             </div>
           </section>
@@ -1394,6 +1462,18 @@ const App: React.FC = () => {
               playbackTime={userPlaybackTime}
               showNavigationHints={false}
               totalDuration={userPitchData.times.length > 0 ? userPitchData.times[userPitchData.times.length - 1] : 0}
+              yFit={loopYFit}
+              isUserRecording={isUserRecording}
+              onChartReady={setUserChartInstance}
+              yAxisConfig={{
+                beginAtZero: false,
+                suggestedMin: loopYFit ? loopYFit[0] : DEFAULT_MIN_PITCH,
+                suggestedMax: loopYFit ? loopYFit[1] : DEFAULT_MAX_PITCH,
+                ticks: {
+                  stepSize: 50,
+                  precision: 0
+                }
+              }}
             />
             <Recorder
               onRecordingComplete={(_, blob: Blob) => setAudioBlob(blob)}
