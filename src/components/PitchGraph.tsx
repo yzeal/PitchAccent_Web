@@ -1874,7 +1874,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         background: '#fff',
         borderRadius: 8,
         padding: 0, // Remove padding
-        marginBottom: 16, // Reduce bottom margin
+        marginBottom: 8, // Reduce bottom margin from 16px to 8px
         position: 'relative',
       }}
     >
