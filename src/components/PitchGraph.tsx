@@ -803,29 +803,19 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
     const pixelsPerUnit = (chart.chartArea.right - chart.chartArea.left) / (xScale.max - xScale.min);
     const deltaX = dx / pixelsPerUnit;
     
-    // Calculate new min/max positions
-    let newMin = currentMin - deltaX;
-    let newMax = currentMax - deltaX;
-
-    // Prevent panning beyond bounds
-    if (newMin < 0) {
-        newMin = 0;
-        newMax = currentRange;
-    } else if (newMax > maxRange) {
-        newMax = maxRange;
-        newMin = Math.max(0, newMax - currentRange);
-    }
+    // Use the improved pan range calculation function
+    const newRange = calculatePanRange(currentMin, currentMax, deltaX);
 
     // Only update if we actually moved and the new range is valid
-    if (newMin !== currentMin || newMax !== currentMax) {
-        zoomStateRef.current = { min: newMin, max: newMax };
-        setViewRange({ min: newMin, max: newMax });
+    if (newRange.min !== currentMin || newRange.max !== currentMax) {
+        zoomStateRef.current = { min: newRange.min, max: newRange.max };
+        setViewRange({ min: newRange.min, max: newRange.max });
         lastMouseXRef.current = mouseX;
 
         // Update chart scales
         if (chart.options.scales?.x) {
-            chart.options.scales.x.min = newMin;
-            chart.options.scales.x.max = newMax;
+            chart.options.scales.x.min = newRange.min;
+            chart.options.scales.x.max = newRange.max;
         }
         
         // Always restore the loop region with preserved values
@@ -840,7 +830,7 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
 
         // Notify parent of view change, passing the preserved loop values
         if (onViewChange) {
-          onViewChange(newMin, newMax, currentLoopStart, currentLoopEnd);
+          onViewChange(newRange.min, newRange.max, currentLoopStart, currentLoopEnd);
         }
     }
   };
@@ -1211,13 +1201,13 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       const chartArea = chart.chartArea;
       const pixelsPerUnit = (chartArea.right - chartArea.left) / (xScale.max - xScale.min);
       
-      // Apply a small multiplier for mobile to make panning feel more responsive
-      // (since touch is less precise than mouse)
-      const mobilePanMultiplier = 1.2;
+      // Apply a modified multiplier that makes it easier to pan on mobile
+      // Reduce the multiplier to make fine-grained panning easier
+      const mobilePanMultiplier = 1.0; // Reduced from 1.2 for more precise control
       const deltaValue = (touchDeltaX / pixelsPerUnit) * mobilePanMultiplier;
       
-      // Log occasionally to debug
-      if (Math.random() < 0.05) {
+      // Log occasionally to debug - increase frequency for testing this fix
+      if (Math.random() < 0.1) {
         console.log('[PitchGraph] Mobile Pan:', {
           touchDeltaX,
           pixelsPerUnit,
@@ -1225,57 +1215,23 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
           viewWidth: chartArea.right - chartArea.left,
           viewRange: xScale.max - xScale.min,
           mobilePanMultiplier,
-          currentView: { min: xScale.min, max: xScale.max }
+          currentView: { min: xScale.min, max: xScale.max },
+          totalDataRange: actualTotalRangeRef.current
         });
       }
       
       const { min: currentMin, max: currentMax } = zoomStateRef.current;
-      const currentRange = currentMax - currentMin;
       
-      // Calculate new positions
-      let newMin = currentMin - deltaValue;
-      let newMax = currentMax - deltaValue;
-      
-      // Prevent panning beyond bounds
-      if (newMin < 0) {
-        // If trying to pan beyond left edge, lock to 0
-        newMin = 0;
-        newMax = currentRange;
-      } else if (newMax > totalDataRange.max) {
-        // If trying to pan beyond right edge, lock to max
-        newMax = totalDataRange.max;
-        newMin = Math.max(0, newMax - currentRange);
-      }
-      
-      // IMPORTANT: Verify we're not creating a tiny or invalid range
-      // This prevents the 0-1s bug on mobile panning
-      const minViewRange = 0.5;
-      if (newMax - newMin < minViewRange || newMax <= newMin) {
-        // Skip this update - it would create an invalid state
-        console.log('[PitchGraph] Prevented invalid view range during pan:', {
-          newMin,
-          newMax,
-          totalMax: totalDataRange.max
-        });
-        
-        // Just update touch reference but don't change view
-        touchPanRef.current = {
-          x: touch.clientX,
-          y: touch.clientY
-        };
-        return;
-      }
-      
-      // Double-check the range using our utility function
-      const validatedRange = validateAndCorrectViewRange({ min: newMin, max: newMax });
+      // Use the improved pan range calculation
+      const newRange = calculatePanRange(currentMin, currentMax, deltaValue);
       
       // Update zoom state
-      zoomStateRef.current = { min: validatedRange.min, max: validatedRange.max };
+      zoomStateRef.current = { min: newRange.min, max: newRange.max };
       
       // Update chart scales
       if (chart.options.scales?.x) {
-        chart.options.scales.x.min = validatedRange.min;
-        chart.options.scales.x.max = validatedRange.max;
+        chart.options.scales.x.min = newRange.min;
+        chart.options.scales.x.max = newRange.max;
       }
       
       // Always restore the loop region with preserved values
@@ -1287,14 +1243,14 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       }
       
       // Update view range
-      setViewRange({ min: validatedRange.min, max: validatedRange.max });
+      setViewRange({ min: newRange.min, max: newRange.max });
       
       // Update chart
       chart.update('none');
       
       // Notify parent of view change with preserved loop values
       if (onViewChange) {
-        onViewChange(validatedRange.min, validatedRange.max, currentLoopStart, currentLoopEnd);
+        onViewChange(newRange.min, newRange.max, currentLoopStart, currentLoopEnd);
       }
       
       // Update touch reference for next move
@@ -1810,6 +1766,65 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       }
     }
   }, [viewRange, onViewChange]);
+
+  // Utility function to improve mobile panning for edge cases
+  const calculatePanRange = (currentMin: number, currentMax: number, delta: number) => {
+    // Get the total available range
+    const maxRange = actualTotalRangeRef.current;
+    
+    // Calculate the current view window size
+    const windowSize = currentMax - currentMin;
+    
+    // Apply delta to create new range
+    let newMin = currentMin - delta;
+    let newMax = currentMax - delta;
+    
+    // Ensure the range stays valid
+    // IMPROVEMENT: Use more careful boundary checks to avoid unwanted range modification
+    
+    // Handle left boundary - never go below 0
+    if (newMin < 0) {
+      // Log when we hit the left boundary
+      console.log('[PitchGraph] Hit left boundary during pan');
+      newMin = 0;
+      newMax = windowSize; // Maintain window size
+    }
+    
+    // Handle right boundary - never go beyond max range
+    if (newMax > maxRange) {
+      // Log when we hit the right boundary
+      console.log('[PitchGraph] Hit right boundary during pan', {
+        newMax,
+        maxRange,
+        delta
+      });
+      newMax = maxRange;
+      // IMPORTANT CHANGE: Allow going all the way to the end by adjusting min accordingly
+      // This helps with panning to the right end of short videos
+      newMin = Math.max(0, maxRange - windowSize);
+    }
+    
+    // Make sure we still have a valid range
+    const minViewRange = 0.5;
+    
+    // Safety check for invalid ranges
+    if (newMax - newMin < minViewRange || newMax <= newMin) {
+      console.log('[PitchGraph] Invalid range detected during pan calculation, using fallback values');
+      // Use a safe fallback that maintains the current window position as much as possible
+      if (currentMin < 0.5) {
+        // If we're at the start, stay at the start
+        return { min: 0, max: Math.min(maxRange, Math.max(minViewRange, windowSize)) };
+      } else if (currentMax > maxRange - 0.5) {
+        // If we're at the end, stay at the end
+        return { min: Math.max(0, maxRange - windowSize), max: maxRange };
+      } else {
+        // Otherwise maintain the current view
+        return { min: currentMin, max: currentMax };
+      }
+    }
+    
+    return { min: newMin, max: newMax };
+  };
 
   return (
     <div
