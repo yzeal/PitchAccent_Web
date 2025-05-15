@@ -1006,115 +1006,77 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
         return;
       }
       
-      // Calculate zoom factor based on the change in distance
-      const zoomFactor = newDistance / initialDistance;
+      console.log('[PitchGraph] Pinch zoom detected', {
+        initialDistance,
+        newDistance,
+        currentViewRange: `${currentRange.min.toFixed(2)} - ${currentRange.max.toFixed(2)}`,
+        totalDataRange: actualTotalRangeRef.current
+      });
       
-      // Add stronger min/max limits for zoom factor to prevent extreme jumps
-      // Too small zoom factors can cause jump to 0-1 range
-      const limitedZoomFactor = Math.max(0.7, Math.min(1.5, zoomFactor));
-      
-      // Log zoom operation occasionally for debugging
-      if (Math.random() < 0.1) {
-        console.log('[PitchGraph] Mobile pinch zoom:', {
-          newDistance, 
-          initialDistance,
-          rawZoomFactor: zoomFactor,
-          limitedZoomFactor,
-          currentView: { ...zoomStateRef.current }
-        });
-      }
-      
-      // Calculate center point of the pinch
+      // Get primary touch point positions
       const centerX = (touch1.clientX + touch2.clientX) / 2;
       const rect = chart.canvas.getBoundingClientRect();
-      const mouseX = centerX - rect.left;
+      const touchX = centerX - rect.left;
       
       // Calculate the data value at pinch center
       const xScale = chart.scales.x;
-      const mouseDataX = xScale?.getValueForPixel?.(mouseX);
-      if (mouseDataX === undefined) return;
+      if (!xScale) return;
       
-      const { min: currentMin, max: currentMax } = zoomStateRef.current;
       const chartArea = chart.chartArea;
+      const min = xScale.min;
+      const max = xScale.max;
       
-      // Calculate new range while keeping pinch center fixed
-      const currentViewRange = currentMax - currentMin;
+      // Simplified approach: calculate touch point position as percentage across chart area
+      const touchPercent = Math.max(0, Math.min(1, (touchX - chartArea.left) / (chartArea.right - chartArea.left)));
       
-      // Calculate new range based on limited zoom factor - use smaller changes
-      // This helps prevent dramatic changes on mobile that can disorient
-      const zoomMultiplier = 0.7; // Make zoom less aggressive
-      const scaledZoomFactor = 1 + ((limitedZoomFactor - 1) * zoomMultiplier);
-      let newRange = currentViewRange / scaledZoomFactor;
+      // Calculate the data point at the touch position
+      const pinchCenterValue = min + (max - min) * touchPercent;
       
-      // IMPORTANT: Set minimum range to prevent "jumping" to 0-1s view
-      // This is especially important on mobile where touch events can be less precise
-      const minViewRange = 0.5; // Never allow zooming in beyond 0.5 seconds
+      // Calculate zoom ratio (>1 for zoom in, <1 for zoom out)
+      const zoomRatio = initialDistance / newDistance;
       
-      // Also prevent extreme zoom out that can cause view instability
-      const maxViewRange = totalDataRange.max;
+      // Limit zoom ratio to avoid extreme jumps
+      const limitedZoomRatio = Math.max(0.5, Math.min(2.0, zoomRatio));
       
-      // Keep range within safe bounds
-      if (newRange < minViewRange) {
-        newRange = minViewRange;
-      } else if (newRange > maxViewRange) {
-        newRange = maxViewRange;
+      // Calculate new range based on zoom ratio
+      const rangeSize = max - min;
+      const newRangeSize = rangeSize * limitedZoomRatio;
+      
+      // Calculate how to distribute the new range around the pinch center
+      const leftPortion = touchPercent;
+      const rightPortion = 1 - touchPercent;
+      
+      // Calculate new min and max
+      let newMin = pinchCenterValue - (newRangeSize * leftPortion);
+      let newMax = pinchCenterValue + (newRangeSize * rightPortion);
+      
+      // Ensure we don't go out of bounds
+      if (newMin < 0) {
+        newMin = 0;
+        newMax = Math.min(actualTotalRangeRef.current, newMin + newRangeSize);
       }
       
-      // Keep the amount we can change in a single pinch limited
-      const maxChange = currentViewRange * 0.4; // Max 40% change per pinch
-      if (Math.abs(newRange - currentViewRange) > maxChange) {
-        if (newRange < currentViewRange) {
-          newRange = currentViewRange - maxChange; // Zooming in
-        } else {
-          newRange = currentViewRange + maxChange; // Zooming out
-        }
+      if (newMax > actualTotalRangeRef.current) {
+        newMax = actualTotalRangeRef.current;
+        newMin = Math.max(0, newMax - newRangeSize);
       }
       
-      // Calculate new view range position
-      const mouseRatio = (mouseX - chartArea.left) / (chartArea.right - chartArea.left);
-      const newMin = mouseDataX - (newRange * mouseRatio);
-      const newMax = newMin + newRange;
-      
-      // Apply limits and ensure a valid range
-      const finalMin = Math.max(0, newMin);
-      const finalMax = Math.min(totalDataRange.max, Math.max(finalMin + minViewRange, newMax));
-      
-      // IMPORTANT: Verify we're not creating a tiny or invalid range
-      // This prevents the 0-1s bug on mobile pinch zoom
-      if (finalMax - finalMin < minViewRange || 
-          finalMax <= finalMin || 
-          finalMin < 0 || 
-          finalMax > totalDataRange.max) {
-        
-        // Log the invalid view state for debugging
-        console.log('[PitchGraph] Prevented invalid view range:', {
-          finalMin,
-          finalMax,
-          totalMax: totalDataRange.max
-        });
-        
-        // Skip this update - it would create an invalid state
-        // Just update touch start reference but don't change the view
-        touchStartRef.current = {
-          x1: touch1.clientX,
-          y1: touch1.clientY,
-          x2: touch2.clientX,
-          y2: touch2.clientY,
-          distance: newDistance
-        };
-        return;
+      // Ensure minimum range of 0.5 seconds
+      if (newMax - newMin < 0.5) {
+        const center = (newMin + newMax) / 2;
+        newMin = Math.max(0, center - 0.25);
+        newMax = Math.min(actualTotalRangeRef.current, center + 0.25);
       }
       
-      // Double-check the range using our utility function
-      const finalValidatedRange = validateAndCorrectViewRange({ min: finalMin, max: finalMax });
+      console.log('[PitchGraph] New zoom range: ', { newMin, newMax });
       
       // Update zoom state
-      zoomStateRef.current = { min: finalValidatedRange.min, max: finalValidatedRange.max };
+      zoomStateRef.current = { min: newMin, max: newMax };
       
       // Update chart scales
       if (chart.options.scales?.x) {
-        chart.options.scales.x.min = finalValidatedRange.min;
-        chart.options.scales.x.max = finalValidatedRange.max;
+        chart.options.scales.x.min = newMin;
+        chart.options.scales.x.max = newMax;
       }
       
       // Always restore the loop region with preserved values
@@ -1126,14 +1088,14 @@ const PitchGraphWithControls = (props: PitchGraphWithControlsProps) => {
       }
       
       // Update view range
-      setViewRange({ min: finalValidatedRange.min, max: finalValidatedRange.max });
+      setViewRange({ min: newMin, max: newMax });
       
       // Update chart
       chart.update('none');
       
       // Notify parent of view change with preserved loop values
       if (onViewChange) {
-        onViewChange(finalValidatedRange.min, finalValidatedRange.max, currentLoopStart, currentLoopEnd);
+        onViewChange(newMin, newMax, currentLoopStart, currentLoopEnd);
       }
       
       // Update touch start reference for next move
